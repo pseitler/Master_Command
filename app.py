@@ -12,13 +12,17 @@ st.set_page_config(layout="wide", page_title="Master Command by PS")
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
+    h1 { text-align: right; }
     
-    /* Contenedores */
     .table-container {
         width: 100%;
         overflow-x: auto;
+        max-height: 550px;
+        overflow-y: auto;
         margin-bottom: 2rem;
+        border: 1px solid #333;
     }
+    
     .titanes-scroll {
         width: 100%;
         max-height: 460px;
@@ -27,17 +31,10 @@ st.markdown("""
         margin-bottom: 2rem;
         border: 1px solid #333333;
     }
-    
-    .table-container table, .titanes-scroll table {
-        width: 100%;
-        border-collapse: separate; 
-        border-spacing: 0;
-        color: #E0E0E0;
-        font-family: 'Inter', sans-serif;
-        font-size: 14px;
-    }
 
-    /* NUEVO: Encabezados de Agrupación (Fila 1) */
+    table { width: 100%; border-collapse: separate; border-spacing: 0; color: #E0E0E0; font-family: 'Inter', sans-serif; font-size: 13px; }
+
+    /* Encabezados Superiores (Agrupación) */
     .group-header {
         background-color: #161a21 !important;
         color: #888888 !important;
@@ -48,35 +45,21 @@ st.markdown("""
         text-align: center !important;
     }
 
-    /* Congelar la Fila de Agrupación (Arriba - Nivel 1) */
-    thead tr:nth-child(1) th {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
+    thead tr:nth-child(1) th { position: sticky; top: 0; z-index: 10; }
 
-    /* Congelar la Fila de Títulos (Arriba - Nivel 2) */
+    /* Encabezados de Columna */
     thead tr:nth-child(2) th {
         position: sticky;
-        top: 36px; /* Altura aproximada de la primera fila */
+        top: 36px;
         background-color: #1E1E24 !important;
         color: #FFFFFF;
         z-index: 10;
-        padding: 12px;
+        padding: 10px;
         border-bottom: 2px solid #333333;
         white-space: nowrap;
     }
 
-    /* Diseño de las celdas normales */
-    .table-container td, .titanes-scroll td {
-        padding: 10px 14px;
-        text-align: center;
-        border-bottom: 1px solid #262730;
-        white-space: nowrap;
-        background-color: #0E1117;
-    }
-
-    /* Congelar la Primera Columna de Nombres (Izquierda) */
+    /* Primera columna pegada (Nombre) */
     tbody td:first-child, thead tr:nth-child(2) th:first-child {
         position: sticky;
         left: 0;
@@ -86,10 +69,14 @@ st.markdown("""
         background-color: #161a21 !important;
     }
 
-    /* Intersección Esquina Superior Izquierda (Debe estar por encima de todo) */
-    thead tr:nth-child(1) th:first-child, thead tr:nth-child(2) th:first-child {
-        z-index: 12;
-        background-color: #1E1E24 !important;
+    thead tr:nth-child(1) th:first-child, thead tr:nth-child(2) th:first-child { z-index: 12; background-color: #1E1E24 !important; }
+
+    td {
+        padding: 8px 12px;
+        text-align: center;
+        border-bottom: 1px solid #262730;
+        white-space: nowrap;
+        background-color: #0E1117;
     }
 
     .tv-link { color: #2962FF; text-decoration: none; font-weight: bold; }
@@ -157,7 +144,7 @@ ACTIVOS = {
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
 # ==========================================
-# BLOQUE 2: LINKS A TRADINGVIEW (MAPEO EXACTO)
+# BLOQUE 2: LINKS A TRADINGVIEW
 # ==========================================
 def get_tv_url(ticker):
     tv_mapping = {
@@ -197,7 +184,6 @@ def obtener_precios():
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
-        # Merval CCL Argentina y Gold Silver Ratio
         merv, ggal_ba, ggal_us = df_precios['^MERV'].ffill(), df_precios['GGAL.BA'].ffill(), df_precios['GGAL'].ffill()    
         df_precios['MERVAL_USD'] = merv / (ggal_ba / (ggal_us * 10))
         
@@ -208,7 +194,8 @@ def obtener_precios():
         return df_precios, df_volumen, hora_actualizacion
     except: return pd.DataFrame(), pd.DataFrame(), None
 
-@st.cache_data(ttl=300)
+# OPTIMIZACIÓN 1: Caching Estricto TTL 24 horas (86400 segundos) para datos macro
+@st.cache_data(ttl=86400)
 def obtener_macro_fred():
     try:
         def fetch_fred(series_id):
@@ -244,8 +231,12 @@ def obtener_fundamentales(ticker):
     try:
         info = yf.Ticker(ticker).info
         return {
-            "PE": info.get("trailingPE", "-"), "Beta": info.get("beta", "-"), "Target": info.get("targetMeanPrice", "-"),
-            "EPS": info.get("trailingEps", "-"), "Rec": info.get("recommendationKey", "-").replace("_", " ").title()
+            "PE": info.get("trailingPE", "-"),
+            "Fwd P/E": info.get("forwardPE", "-"), # MÉTRICA FUTURA AÑADIDA
+            "Beta": info.get("beta", "-"), 
+            "Target": info.get("targetMeanPrice", "-"),
+            "EPS": info.get("trailingEps", "-"), 
+            "Rec": info.get("recommendationKey", "-").replace("_", " ").title()
         }
     except: return {}
 
@@ -269,7 +260,7 @@ def obtener_opciones_titanes(tickers_titanes):
     return pd.DataFrame(resultados)
 
 # ==========================================
-# BLOQUE 4: MOTOR MATEMÁTICO (RSI, MDD, SMA)
+# BLOQUE 4: MOTOR MATEMÁTICO
 # ==========================================
 def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u):
     fecha_p = pd.to_datetime(fecha_ref).normalize()
@@ -307,12 +298,12 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
         "YTD": format_pct(ytd), "1Y": format_pct(pct_c(252)), "3Y": format_pct(pct_c(756)),
         "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val,
         "P/E": f"{fund.get('PE'):.2f}" if isinstance(fund.get('PE'), (int,float)) else "-",
+        "Fwd P/E": f"{fund.get('Fwd P/E'):.2f}" if isinstance(fund.get('Fwd P/E'), (int,float)) else "-",
         "Beta": f"{fund.get('Beta'):.2f}" if isinstance(fund.get('Beta'), (int,float)) else "-",
         "Target": f"{fund.get('Target'):.2f}" if isinstance(fund.get('Target'), (int,float)) else "-",
         "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-", "Rec.": fund.get("Rec", "-")
     }
 
-# NUEVO: Generador de Tablas HTML con Encabezados Agrupados (Grid Profesional)
 def generar_tabla_html_agrupada(df, clase_css):
     html = f'<div class="{clase_css}"><table>'
     html += '''
@@ -322,21 +313,21 @@ def generar_tabla_html_agrupada(df, clase_css):
             <th colspan="3" class="group-header">PRECIOS & RANGO</th>
             <th colspan="6" class="group-header">RENDIMIENTOS (%)</th>
             <th colspan="3" class="group-header">ANÁLISIS QUANT</th>
-            <th colspan="5" class="group-header">FUNDAMENTALES</th>
+            <th colspan="6" class="group-header">FUNDAMENTALES</th>
         </tr>
         <tr>
             <th>Nombre</th>
-            <th>Precio / Ratio</th><th>Low 52W</th><th>High 52W</th>
+            <th>Precio/Ratio</th><th>Low 52W</th><th>High 52W</th>
             <th>1D</th><th>1W</th><th>1M</th><th>YTD</th><th>1Y</th><th>3Y</th>
-            <th>RSI (14)</th><th>SMA 200 Dist.</th><th>MDD 1Y</th>
-            <th>P/E</th><th>Beta</th><th>Target</th><th>BPA</th><th>Rec.</th>
+            <th>RSI (14)</th><th>SMA 200</th><th>MDD 1Y</th>
+            <th>P/E</th><th>Fwd P/E</th><th>Beta</th><th>Target</th><th>BPA</th><th>Rec.</th>
         </tr>
     </thead>
     <tbody>
     '''
     for _, row in df.iterrows():
         html += "<tr>"
-        columnas_ordenadas = ["Nombre", "Precio / Ratio", "Low 52W", "High 52W", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Beta", "Target", "BPA", "Rec."]
+        columnas_ordenadas = ["Nombre", "Precio / Ratio", "Low 52W", "High 52W", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]
         for col in columnas_ordenadas:
             val = row.get(col, "-")
             if col in ["1D", "1W", "1M", "YTD", "1Y", "3Y", "SMA 200 Dist.", "MDD 1Y"]:
@@ -381,47 +372,6 @@ with col_cal:
         st.rerun()
 
 with st.spinner('Validando caché y procesando matemáticas en memoria...'):
-    macro_data = obtener_macro_fred()
-
-    # RESPUESTA AL PUNTO 5: Visualización de FED blindada con alertas.
-    if macro_data:
-        st.subheader("🦅 Radar Macroeconómico y Liquidez (FRED)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Tasa FED (Fed Funds)", macro_data["FED Funds Rate"])
-        c2.metric("Inflación CPI (YoY)", macro_data["US CPI (Inflación YoY)"])
-        c3.metric("Desempleo (EE.UU.)", macro_data["US Unemployment Rate"])
-        c4.metric("Balance FED (Var. Mensual)", macro_data["FED Balance Sheet (MoM)"])
-        st.markdown("<br>", unsafe_allow_html=True)
-    else:
-        st.warning("⚠️ Los servidores de la FED (FRED) no respondieron a tiempo o están en mantenimiento. Los datos macroeconómicos están temporalmente ocultos.")
-
-    # RESPUESTA AL PUNTO 2: Buscador táctico
-    st.markdown("---")
-    st.subheader("🔍 Buscador Táctico de Tickers")
-    search_ticker = st.text_input("Introduce un Ticker que no esté en el tablero (ej. MSTR, META, PLTR):").upper().strip()
-    
-    if search_ticker:
-        with st.spinner(f"Descargando y analizando {search_ticker}..."):
-            try:
-                s_data = yf.download(search_ticker, period="10y", interval="1d", auto_adjust=False)
-                if not s_data.empty:
-                    df_s_p = s_data['Adj Close'] if 'Adj Close' in s_data.columns else s_data['Close']
-                    df_s_v = s_data['Volume'] if 'Volume' in s_data.columns else pd.DataFrame()
-                    
-                    df_s_p = pd.DataFrame({search_ticker: df_s_p})
-                    if isinstance(df_s_v, pd.Series): df_s_v = pd.DataFrame({search_ticker: df_s_v})
-                    
-                    df_s_p.index = pd.to_datetime(df_s_p.index).tz_localize(None).normalize()
-                    if not df_s_v.empty: df_s_v.index = pd.to_datetime(df_s_v.index).tz_localize(None).normalize()
-
-                    res_s = calcular_metricas(df_s_p, df_s_v, search_ticker, search_ticker, fecha_sel, date.today())
-                    if res_s:
-                        html_busqueda = generar_tabla_html_agrupada(pd.DataFrame([res_s]), "table-container")
-                        st.markdown(html_busqueda, unsafe_allow_html=True)
-                else:
-                    st.error("❌ No se encontraron datos. Verifica que el Ticker sea correcto según Yahoo Finance.")
-            except Exception as e:
-                st.error("❌ Ticker no válido o error de red.")
 
     # TABLEROS PRINCIPALES
     if not df_p.empty:
@@ -435,16 +385,60 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
             
             if res:
                 df_res = pd.DataFrame(res)
-                # RESPUESTA AL PUNTO 3: Tablas agrupadas implementadas
                 clase_css = "titanes-scroll" if "TITANES" in cat else "table-container"
                 html_table = generar_tabla_html_agrupada(df_res, clase_css)
                 st.markdown(html_table, unsafe_allow_html=True)
+            
+            # Ubicar Buscador debajo de TITANES GLOBALES
+            if cat == "TITANES GLOBALES (15)":
+                st.markdown("---")
+                st.subheader("🔍 Buscador Táctico de Tickers")
+                # Crear columna pequeña (1/3) para el buscador
+                col_busqueda, _ = st.columns([1, 2])
+                with col_busqueda:
+                    search_ticker = st.text_input("Introduce Ticker (ej: NVDA, BTC-USD):").upper().strip()
+                
+                if search_ticker:
+                    with st.spinner(f"Analizando {search_ticker}..."):
+                        try:
+                            # Descarga individual blindada
+                            tk = yf.Ticker(search_ticker)
+                            hist = tk.history(period="10y")
+                            if not hist.empty:
+                                df_s_p = pd.DataFrame({search_ticker: hist['Close']})
+                                df_s_v = pd.DataFrame({search_ticker: hist['Volume']})
+                                
+                                df_s_p.index = df_s_p.index.tz_localize(None).normalize()
+                                df_s_v.index = df_s_v.index.tz_localize(None).normalize()
+
+                                res_s = calcular_metricas(df_s_p, df_s_v, search_ticker, search_ticker, fecha_sel, date.today())
+                                if res_s:
+                                    html_busqueda = generar_tabla_html_agrupada(pd.DataFrame([res_s]), "table-container")
+                                    st.markdown(html_busqueda, unsafe_allow_html=True)
+                            else:
+                                st.error("❌ Ticker no encontrado en Yahoo Finance.")
+                        except Exception as e:
+                            st.error("❌ Ticker no válido o error de red.")
 
         if fecha_sel >= f_u:
             st.markdown("---")
+            
+            # MOVIDO: Bloque Macro de la FED justo antes de correlación y sentimiento
+            macro_data = obtener_macro_fred()
+            if macro_data:
+                st.subheader("🦅 Radar Macroeconómico y Liquidez (FRED)")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Tasa FED (Fed Funds)", macro_data["FED Funds Rate"])
+                c2.metric("Inflación CPI (YoY)", macro_data["US CPI (Inflación YoY)"])
+                c3.metric("Desempleo (EE.UU.)", macro_data["US Unemployment Rate"])
+                c4.metric("Balance FED (Var. Mensual)", macro_data["FED Balance Sheet (MoM)"])
+                st.markdown("<br>", unsafe_allow_html=True)
+            else:
+                st.warning("⚠️ Los servidores de la FED (FRED) no respondieron a tiempo o están en mantenimiento. Los datos macroeconómicos están temporalmente ocultos.")
+            
             col_opt, col_corr = st.columns([1, 1])
             with col_opt:
-                st.subheader("🕸️ Matriz de Correlación (1 Año)")
+                st.subheader("🕸️ Matriz de Correlación Dinámica (1 Año)")
                 try:
                     titanes_tickers = list(ACTIVOS["TITANES GLOBALES (15)"].values())
                     existentes = [t for t in titanes_tickers if t in df_p.columns]
@@ -453,7 +447,7 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
                     corr_matrix = corr_matrix.rename(columns=nombres_cortos, index=nombres_cortos)
                     html_corr = corr_matrix.style.background_gradient(cmap='coolwarm', axis=None, vmin=-1, vmax=1).format("{:.2f}").to_html()
                     st.markdown(f'<div class="table-container">{html_corr}</div>', unsafe_allow_html=True)
-                except: st.info("Datos insuficientes para la matriz.")
+                except: st.info("Datos insuficientes para la matriz de stress testing.")
 
             with col_corr:
                 st.subheader("🔥 Sentimiento (Opciones)")
