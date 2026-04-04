@@ -125,6 +125,9 @@ def obtener_datos():
     
     # IMPORTANTE: Aumentamos a 10 años para poder viajar al pasado y seguir teniendo 3 años previos
     df = yf.download(all_tickers, period="10y", interval="1d")['Adj Close']
+
+# NUEVA LÍNEA: Limpiamos la zona horaria para que coincida con el calendario
+    df.index = df.index.tz_localize(None)
     
     try:
         merv = df['^MERV'].ffill()
