@@ -110,7 +110,7 @@ ACTIVOS = {
 
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: MOTOR DE DATOS Y LÓGICA MERVAL ---
+# --- BLOQUE 2: MOTOR DE DATOS BLINDADO ---
 @st.cache_data(ttl=300) 
 def obtener_datos():
     all_tickers = []
@@ -123,41 +123,52 @@ def obtener_datos():
     all_tickers.extend(TICKERS_AUXILIARES)
     all_tickers = list(set(all_tickers)) 
     
-    # IMPORTANTE: Aumentamos a 10 años para poder viajar al pasado y seguir teniendo 3 años previos
-    df = yf.download(all_tickers, period="10y", interval="1d")['Adj Close']
-
-# NUEVA LÍNEA: Limpiamos la zona horaria para que coincida con el calendario
-    df.index = df.index.tz_localize(None)
-    
     try:
+        # Descarga con auto_adjust=False para garantizar que la estructura no cambie
+        data = yf.download(all_tickers, period="10y", interval="1d", auto_adjust=False)
+        
+        # Corrección para la nueva versión de yfinance (manejo de MultiIndex)
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Adj Close' in data.columns.levels[0]:
+                df = data['Adj Close']
+            else:
+                df = data['Close']
+        else:
+            df = data
+            
+        # ESTO ES VITAL: Limpia la zona horaria y fuerza todas las fechas a las 00:00:00
+        df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
+        
+        # Lógica CCL Argentina
         merv = df['^MERV'].ffill()
         ggal_ba = df['GGAL.BA'].ffill() 
         ggal_us = df['GGAL'].ffill()    
         
         ccl = ggal_ba / (ggal_us * 10)
-        merval_usd = merv / ccl
+        df['MERVAL_USD'] = merv / ccl
         
-        df['MERVAL_USD'] = merval_usd
+        return df
     except Exception as e:
-        df['MERVAL_USD'] = pd.Series(dtype=float) 
-        
-    return df
+        # Si Yahoo rechaza la conexión, devolvemos un dataframe vacío para disparar la alerta
+        return pd.DataFrame()
 
-# --- BLOQUE 3: CÁLCULO DE MÉTRICAS FINANCIERAS EN EL TIEMPO ---
-# Se añade el parámetro fecha_ref para saber hasta dónde mirar
+# --- BLOQUE 3: CÁLCULO DE MÉTRICAS CON FILTRO EXACTO ---
 def calcular_metricas(df, ticker, nombre, fecha_ref):
-    # Convertimos la fecha del calendario a un formato que entienda la base de datos
-    fecha_pandas = pd.to_datetime(fecha_ref)
+    # Verificamos si el ticker realmente existe en la descarga
+    if ticker not in df.columns:
+        raise ValueError("Ticker no disponible")
+
+    # Forzamos la fecha del calendario a las 00:00:00 para que coincida perfecto con Yahoo
+    fecha_pandas = pd.to_datetime(fecha_ref).normalize()
     
-    # CORTAMOS LA HISTORIA: Eliminamos todos los datos que ocurrieron después de la fecha elegida
+    # Cortamos la historia
     serie = df[ticker].loc[:fecha_pandas].dropna()
     
     if serie.empty:
         raise ValueError("Sin datos para esta fecha")
         
-    # El "precio actual" ahora es el precio del último día válido hasta la fecha elegida
     precio_actual = serie.iloc[-1]
-    fecha_precio_real = serie.index[-1].strftime('%d-%m-%Y') # Guardamos qué día exacto tomó (por si fue fin de semana)
+    fecha_precio_real = serie.index[-1].strftime('%d-%m-%Y') 
     
     def pct_change(days):
         try:
@@ -165,14 +176,12 @@ def calcular_metricas(df, ticker, nombre, fecha_ref):
             return ((precio_actual - inicio) / inicio) * 100
         except: return 0.0
 
-    # Cálculo YTD ajustado: Busca el inicio del año de la fecha elegida
     try:
         inicio_anio = serie.loc[serie.index.year == fecha_pandas.year].iloc[0]
         ytd = ((precio_actual - inicio_anio) / inicio_anio) * 100
     except:
         ytd = 0.0
     
-    # Cálculo de 52 Semanas ajustado a la fecha elegida
     try:
         ultimo_anio = serie.iloc[-252:]
         high_52w = ((precio_actual - ultimo_anio.max()) / ultimo_anio.max()) * 100
@@ -184,7 +193,7 @@ def calcular_metricas(df, ticker, nombre, fecha_ref):
         "Nombre": nombre,
         "Ticker": ticker,
         "Precio": round(precio_actual, 2),
-        "Fecha Ref.": fecha_precio_real, # Nueva columna útil
+        "Fecha Ref.": fecha_precio_real, 
         "Low 52W": f"{round(low_52w, 1)}%",
         "High 52W": f"{round(high_52w, 1)}%",
         "1D": round(serie.pct_change().iloc[-1] * 100, 2),
@@ -198,13 +207,12 @@ def calcular_metricas(df, ticker, nombre, fecha_ref):
 # --- BLOQUE 4: MOTOR VISUAL Y RENDERING ---
 st.title("📊 Global Market & Macro Tracker")
 
-# MÁQUINA DEL TIEMPO: Interfaz de Calendario
 col1, col2 = st.columns([1, 3])
 with col1:
     fecha_seleccionada = st.date_input(
         "🗓️ Seleccionar Fecha de Análisis", 
-        value=date.today(), # Por defecto arranca hoy
-        max_value=date.today() # No permite elegir fechas del futuro
+        value=date.today(), 
+        max_value=date.today() 
     )
 
 st.caption(f"Calculando rentabilidades respecto a los precios de cierre del: {fecha_seleccionada.strftime('%d-%m-%Y')}")
@@ -226,22 +234,27 @@ def color_heatmap(val):
 with st.spinner(f'Procesando mercado y calculando métricas históricas al {fecha_seleccionada.strftime("%d-%m-%Y")}...'):
     precios = obtener_datos()
     
-    for categoria, items in ACTIVOS.items():
-        st.subheader(categoria)
-        lista_resultados = []
-        
-        for nombre, ticker in items.items():
-            try:
-                # Enviamos la fecha del calendario a la función matemática
-                metrica = calcular_metricas(precios, ticker, nombre, fecha_seleccionada)
-                lista_resultados.append(metrica)
-            except Exception as e:
-                continue
-        
-        if lista_resultados:
-            df_display = pd.DataFrame(lista_resultados)
-            st.dataframe(
-                df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
-                hide_index=True,
-                use_container_width=True
-            )
+    # SISTEMA ANTI-PANTALLA BLANCA
+    if precios.empty:
+        st.error("🚨 Error Crítico: No se pudieron descargar los datos. Yahoo Finance podría estar bloqueando temporalmente la conexión desde el servidor. Intenta actualizar la página en unos minutos.")
+    else:
+        for categoria, items in ACTIVOS.items():
+            st.subheader(categoria)
+            lista_resultados = []
+            
+            for nombre, ticker in items.items():
+                try:
+                    metrica = calcular_metricas(precios, ticker, nombre, fecha_seleccionada)
+                    lista_resultados.append(metrica)
+                except Exception as e:
+                    continue
+            
+            if lista_resultados:
+                df_display = pd.DataFrame(lista_resultados)
+                st.dataframe(
+                    df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                st.warning(f"No hay datos disponibles para la categoría: {categoria} en la fecha seleccionada.")
