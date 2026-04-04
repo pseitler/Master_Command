@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_datareader.data as web
 from datetime import datetime, date, timedelta
 import re
 
@@ -75,7 +74,6 @@ st.markdown("""
         color: #448AFF;
     }
     
-    /* Estilo para las métricas de la FRED */
     div[data-testid="metric-container"] {
         background-color: #161a21;
         border: 1px solid #333333;
@@ -149,7 +147,7 @@ def get_tv_url(ticker):
         symbol = symbol.replace('-', '') 
     return f"https://www.tradingview.com/chart/?symbol={symbol}"
 
-# --- BLOQUE 3: MOTOR DE DATOS (YAHOO Y FRED) ---
+# --- BLOQUE 3: MOTOR DE DATOS (YAHOO Y NATIVO FRED) ---
 @st.cache_data(ttl=300) 
 def obtener_precios():
     all_tickers = []
@@ -177,30 +175,35 @@ def obtener_precios():
 
 @st.cache_data(ttl=3600)
 def obtener_macro_fred():
-    # Extrae datos del Banco de la Reserva Federal (FRED)
-    end = date.today()
-    start = end - timedelta(days=400) # Suficiente historia para calcular el dato interanual (YoY)
+    # Nueva extracción nativa sin depender de pandas_datareader
     try:
-        # FEDFUNDS: Tasa de Interés | CPIAUCSL: Inflación | UNRATE: Desempleo | WALCL: Balance de la FED
-        df_macro = web.DataReader(['FEDFUNDS', 'CPIAUCSL', 'UNRATE', 'WALCL'], 'fred', start, end)
-        df_macro = df_macro.ffill()
+        def fetch_fred(series_id):
+            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+            df = pd.read_csv(url, index_col='DATE', parse_dates=True)
+            df.columns = [series_id]
+            df[series_id] = pd.to_numeric(df[series_id], errors='coerce')
+            return df.dropna()
 
-        fed_funds = df_macro['FEDFUNDS'].iloc[-1]
-        unrate = df_macro['UNRATE'].iloc[-1]
+        fed_df = fetch_fred('FEDFUNDS')
+        cpi_df = fetch_fred('CPIAUCSL')
+        unrate_df = fetch_fred('UNRATE')
+        walcl_df = fetch_fred('WALCL')
 
-        # Cálculo de Inflación CPI YoY (Interanual)
-        cpi_latest = df_macro['CPIAUCSL'].iloc[-1]
-        one_year_ago = df_macro.index[-1] - pd.DateOffset(years=1)
-        idx = df_macro.index.get_indexer([one_year_ago], method='nearest')[0]
-        cpi_yoy = ((cpi_latest / df_macro['CPIAUCSL'].iloc[idx]) - 1) * 100
+        fed_funds = fed_df['FEDFUNDS'].iloc[-1]
+        unrate = unrate_df['UNRATE'].iloc[-1]
 
-        # Cálculo de Variación del Balance de la FED (Liquidez Mensual)
-        walcl_latest = df_macro['WALCL'].iloc[-1]
-        one_month_ago = df_macro.index[-1] - pd.DateOffset(months=1)
-        idx_m = df_macro.index.get_indexer([one_month_ago], method='nearest')[0]
-        walcl_mom = ((walcl_latest / df_macro['WALCL'].iloc[idx_m]) - 1) * 100
+        # Inflación CPI YoY
+        cpi_latest = cpi_df['CPIAUCSL'].iloc[-1]
+        one_year_ago = cpi_df.index[-1] - pd.DateOffset(years=1)
+        idx = cpi_df.index.get_indexer([one_year_ago], method='nearest')[0]
+        cpi_yoy = ((cpi_latest / cpi_df['CPIAUCSL'].iloc[idx]) - 1) * 100
 
-        # Colores de tendencia para pintar las flechas en el tablero
+        # Balance MoM
+        walcl_latest = walcl_df['WALCL'].iloc[-1]
+        one_month_ago = walcl_df.index[-1] - pd.DateOffset(months=1)
+        idx_m = walcl_df.index.get_indexer([one_month_ago], method='nearest')[0]
+        walcl_mom = ((walcl_latest / walcl_df['WALCL'].iloc[idx_m]) - 1) * 100
+
         trend_balance = "🟢 Inyectando Liquidez" if walcl_mom > 0 else "🔴 Retirando Liquidez"
 
         return {
@@ -209,7 +212,8 @@ def obtener_macro_fred():
             "US Unemployment Rate": f"{unrate:.1f}%",
             "FED Balance Sheet (MoM)": f"{walcl_mom:.2f}% ({trend_balance})"
         }
-    except: return None
+    except Exception as e: 
+        return None
 
 @st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
@@ -322,7 +326,6 @@ with st.spinner('Procesando algoritmos y radar macroeconómico...'):
     df_p, df_v = obtener_precios()
     macro_data = obtener_macro_fred()
 
-    # RENDERIZADO DEL RADAR MACRO (FRED)
     if macro_data:
         st.subheader("🦅 Radar Macroeconómico y Liquidez (FRED)")
         c1, c2, c3, c4 = st.columns(4)
@@ -377,7 +380,6 @@ ucits_df = pd.DataFrame({
 })
 st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>', unsafe_allow_html=True)
 
-# --- NOTA TÉCNICA: MANUAL DE INTERPRETACIÓN QUANT & MACRO ---
 st.markdown("""
 <div style="background-color: #1E1E24; padding: 20px; border-radius: 8px; border-left: 5px solid #2962FF; margin-top: 20px;">
     <h4>📚 Manual de Interpretación Quant & Macro</h4>
@@ -386,7 +388,7 @@ st.markdown("""
         <li><b>Radar Macro (FRED):</b> El "Motor" del mercado. 
             <ul>
                 <li><i>Balance FED (Liquidez):</i> Si es verde (+), la FED inyecta dinero (combustible para las acciones y Bitcoin). Si es rojo (-), retiran liquidez, aumentando el riesgo de corrección.</li>
-                <li><i>Tasa Desempleo:</i> Si sube rápidamente (regla de Sahm), el mercado anticipa recesión.</li>
+                <li><i>Tasa Desempleo:</i> Si sube rápidamente, el mercado anticipa recesión.</li>
             </ul>
         </li>
         <li><b>RSI (14) - Índice de Fuerza Relativa:</b> Mide la velocidad de los cambios de precio de 0 a 100. 
