@@ -128,7 +128,7 @@ def obtener_datos():
     all_tickers = list(set(all_tickers)) # Eliminamos duplicados
     
     # Descargamos 4 años de historia para los cálculos de largo plazo
-    df = yfinance.download(all_tickers, period="4y", interval="1d")['Adj Close']
+    df = yf.download(all_tickers, period="4y", interval="1d")['Adj Close']
     
     # Lógica de cálculo: Merval Contado Con Liquidación (CCL)
     try:
