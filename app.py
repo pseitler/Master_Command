@@ -3,10 +3,10 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, date
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACIÓN DE PÁGINA Y DISEÑO VISUAL ---
 st.set_page_config(layout="wide", page_title="Master Command by PS")
 
-# --- ESTILOS CSS PROFESIONALES ---
+# Estilos CSS para el modo oscuro y limpieza de las tablas (Look and feel profesional)
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
@@ -16,7 +16,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- BLOQUE 1: DICCIONARIO MAESTRO ORDENADO ---
+# --- BLOQUE 1: DICCIONARIO MAESTRO DE ACTIVOS ---
+# Aquí organizamos todo el tablero. Hemos separado las Tasas (Yields) de los Precios (ETFs)
 ACTIVOS = {
     "MAJOR INDICES": {
         "S&P 500 (^GSPC)": "^GSPC",
@@ -43,12 +44,16 @@ ACTIVOS = {
         "USD / GBP (USDGBP=X)": "USDGBP=X",
         "USD / JPY (USDJPY=X)": "USDJPY=X"
     },
-    "BONDS (Yields & ETFs)": {
+    "US TREASURY YIELD CURVE (Tasas %)": {
+        "13-Week T-Bill (^IRX)": "^IRX",
+        "5-Year T-Note (^FVX)": "^FVX",
+        "10-Year T-Note (^TNX)": "^TNX",
+        "30-Year T-Bond (^TYX)": "^TYX"
+    },
+    "BONDS (US ETFs - Precios)": {
+        "US Treasury 0-1Y ETF (SHV)": "SHV",  # Usado como proxy para el capital de corto plazo
         "US Treasury 20Y+ ETF (TLT)": "TLT",
-        "US Treasury 0-1Y ETF (SHV)": "SHV",
-        "Intl Gov Bonds ETF (BNDX)": "BNDX",
-        "US Treasury 10Y Yield (^TNX)": "^TNX",
-        "US Treasury 30Y Yield (^TYX)": "^TYX"
+        "Intl Gov Bonds ETF (BNDX)": "BNDX"
     },
     "COMMODITIES": {
         "Oil Brent (BZ=F)": "BZ=F", "Gold (GC=F)": "GC=F", "Silver (SI=F)": "SI=F",
@@ -80,10 +85,11 @@ ACTIVOS = {
     }
 }
 
+# Tickers necesarios para calcular el CCL de Argentina
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: MOTOR DE DATOS ---
-@st.cache_data(ttl=300) 
+# --- BLOQUE 2: MOTOR DE EXTRACCIÓN DE DATOS ---
+@st.cache_data(ttl=300) # Memoria caché para no saturar Yahoo Finance (5 minutos)
 def obtener_precios():
     all_tickers = []
     for categoria in ACTIVOS.values():
@@ -93,8 +99,10 @@ def obtener_precios():
     all_tickers = list(set(all_tickers)) 
     
     try:
+        # Descarga de 10 años de historia bursátil
         data = yf.download(all_tickers, period="10y", interval="1d", auto_adjust=False)
         
+        # Lectura de la estructura de tablas de Yahoo Finance
         if isinstance(data.columns, pd.MultiIndex):
             df_precios = data['Adj Close'] if 'Adj Close' in data.columns.levels[0] else data['Close']
             df_volumen = data['Volume']
@@ -102,10 +110,12 @@ def obtener_precios():
             df_precios = data
             df_volumen = pd.DataFrame()
             
+        # Alineación de las fechas eliminando las horas (vital para la "Máquina del tiempo")
         df_precios.index = pd.to_datetime(df_precios.index).tz_localize(None).normalize()
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
+        # Cálculo interno del dólar Contado Con Liquidación para el Merval
         merv = df_precios['^MERV'].ffill()
         ggal_ba = df_precios['GGAL.BA'].ffill() 
         ggal_us = df_precios['GGAL'].ffill()    
@@ -117,9 +127,9 @@ def obtener_precios():
     except Exception as e:
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=3600) 
+@st.cache_data(ttl=3600) # Los datos fundamentales se guardan 1 hora
 def obtener_fundamentales(ticker):
-    # Exclusión de índices y divisas para evitar errores en la API
+    # Evitamos pedir P/E o Beta de índices puros o divisas para evitar errores de la API
     if ticker.startswith("^") or "=" in ticker or ticker == "MERVAL_USD" or ("-" in ticker and ticker != "BTC-USD"):
         return {}
     try:
@@ -136,13 +146,14 @@ def obtener_fundamentales(ticker):
 
 @st.cache_data(ttl=3600)
 def obtener_opciones_titanes(tickers_titanes):
+    # Motor que extrae la posición abierta (Open Interest) de los contratos de opciones
     resultados = []
     for ticker in tickers_titanes:
         try:
             tk = yf.Ticker(ticker)
             expirations = tk.options
             if expirations:
-                opt = tk.option_chain(expirations[0])
+                opt = tk.option_chain(expirations[0]) # Toma el vencimiento más cercano
                 puts_oi = opt.puts['openInterest'].sum()
                 calls_oi = opt.calls['openInterest'].sum()
                 vol_puts = opt.puts['volume'].sum()
@@ -153,25 +164,28 @@ def obtener_opciones_titanes(tickers_titanes):
                 resultados.append({
                     "Titan": ticker,
                     "Vencimiento": expirations[0],
-                    "Put/Call Ratio (OI)": round(ratio_oi, 2),
-                    "Total Puts (Vol)": vol_puts,
-                    "Total Calls (Vol)": vol_calls
+                    "Put/Call Ratio": round(ratio_oi, 2),
+                    "Puts (Open Interest)": int(puts_oi) if pd.notna(puts_oi) else 0,
+                    "Calls (Open Interest)": int(calls_oi) if pd.notna(calls_oi) else 0,
+                    "Total Puts (Vol)": int(vol_puts) if pd.notna(vol_puts) else 0,
+                    "Total Calls (Vol)": int(vol_calls) if pd.notna(vol_calls) else 0
                 })
         except:
             continue
     return pd.DataFrame(resultados)
 
-# --- BLOQUE 3: CÁLCULO DE MÉTRICAS ---
+# --- BLOQUE 3: LÓGICA MATEMÁTICA Y ARMADO DE FILAS ---
 def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_ultima_cotizacion):
     if ticker not in df_precios.columns: raise ValueError("Sin datos")
 
+    # Corta el historial de precios según la fecha del calendario
     fecha_pandas = pd.to_datetime(fecha_ref).normalize()
     serie_precios = df_precios[ticker].loc[:fecha_pandas].dropna()
     
     if serie_precios.empty: raise ValueError("Sin datos")
     precio_actual = serie_precios.iloc[-1]
     
-    # Lógica corregida para el fin de semana
+    # Comprobación de fin de semana para habilitar datos fundamentales
     es_actual = fecha_pandas >= pd.to_datetime(fecha_ultima_cotizacion).normalize()
     
     def format_pct(val):
@@ -183,6 +197,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
             return ((precio_actual - inicio) / inicio) * 100
         except: return "-"
 
+    # Cálculos dinámicos de rentabilidad
     try:
         inicio_anio = serie_precios.loc[serie_precios.index.year == fecha_pandas.year].iloc[0]
         ytd = ((precio_actual - inicio_anio) / inicio_anio) * 100
@@ -195,6 +210,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     except:
         high_52w, low_52w = "-", "-"
 
+    # Cálculo del Volumen Relativo (% de volumen operado hoy vs promedio de 3 meses)
     vol_pct_str = "-"
     if es_actual and not df_volumen.empty and ticker in df_volumen.columns:
         serie_vol = df_volumen[ticker].loc[:fecha_pandas].dropna()
@@ -209,7 +225,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
 
     return {
         "Nombre": nombre,
-        "Precio": f"{precio_actual:,.2f}", # Forzado a 2 decimales exactos
+        "Precio / Tasa": f"{precio_actual:,.2f}", # Asegura siempre 2 decimales
         "Low 52W": low_52w,
         "High 52W": high_52w,
         "1D": format_pct(pct_change(1)),
@@ -226,7 +242,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
         "Rec.": fund.get("Rec", "-")
     }
 
-# --- BLOQUE 4: INTERFAZ MASTER COMMAND ---
+# --- BLOQUE 4: INTERFAZ VISUAL MASTER COMMAND ---
 col_cal, col_title = st.columns([1, 2])
 with col_cal:
     fecha_seleccionada = st.date_input(
@@ -237,6 +253,7 @@ with col_cal:
 with col_title:
     st.title("🛡️ Master Command by PS")
 
+# Función que aplica el Mapa de Calor (Heatmap) solo a las columnas de porcentaje
 def color_heatmap(val):
     if isinstance(val, str) and "%" in val:
         try:
@@ -258,7 +275,7 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
     if df_precios.empty:
         st.error("🚨 Error de conexión con el proveedor de datos. Los servidores de Yahoo pueden estar saturados.")
     else:
-        # Extraemos la fecha real de la última sesión bursátil para arreglar el bug de los fines de semana
+        # Detecta el último día hábil para solucionar problemas de fines de semana y festivos
         fecha_ultima_cotizacion = df_precios.index[-1].date()
         
         for categoria, items in ACTIVOS.items():
@@ -271,6 +288,7 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
                     lista_resultados.append(metrica)
                 except: continue
             
+            # Dibuja la tabla aplicando el color map
             if lista_resultados:
                 df_display = pd.DataFrame(lista_resultados)
                 st.dataframe(
@@ -279,22 +297,21 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
                     use_container_width=True
                 )
 
-        # MÓDULO DE POSICIÓN ABIERTA
+        # MÓDULO DE POSICIÓN ABIERTA (Opciones)
         es_actual_global = pd.to_datetime(fecha_seleccionada).date() >= fecha_ultima_cotizacion
         if es_actual_global:
             st.markdown("---")
             st.subheader("🔥 Sentimiento Institucional Opciones (Titanes Globales)")
-            st.caption("Ratio mayor a 1.0 = Sentimiento Bajista/Cobertura. Menor a 1.0 = Sentimiento Alcista.")
+            st.caption("Ratio mayor a 1.0 = Sentimiento Bajista/Cobertura. Menor a 1.0 = Sentimiento Alcista. Columnas Open Interest detallan contratos abiertos.")
             
-            # Extraemos solo los tickers (la segunda parte del diccionario de Titanes)
             tickers_titanes = list(ACTIVOS["TITANES GLOBALES (15)"].values())
             df_opciones = obtener_opciones_titanes(tickers_titanes)
             if not df_opciones.empty:
                 st.dataframe(df_opciones, hide_index=True, use_container_width=True)
             else:
-                st.info("Datos de cadena de opciones no disponibles temporalmente en la API.")
+                st.info("Datos de cadena de opciones no disponibles temporalmente en la API (Común en fines de semana por mantenimiento).")
 
-# --- BLOQUE 5: TABLA DE EQUIVALENCIAS UCITS ---
+# --- BLOQUE 5: TABLA REFERENCIAL UCITS ---
 st.markdown("---")
 st.subheader("🇪🇺 Diccionario de Equivalencias: US ETFs a UCITS (Europa)")
 ucits_data = {
