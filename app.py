@@ -392,13 +392,53 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
 # BLOQUE 6: EQUIVALENCIAS Y GLOSARIO (MARKDOWN NATIVO)
 # ==========================================
 st.markdown("---")
-st.subheader("🇪🇺 Equivalencias UCITS")
-ucits_df = pd.DataFrame({
-    "Ticker US": ["URTH", "EEM", "RSP", "TLT", "SHV", "XLK", "XLV", "IVE", "IVW", "IWN", "IWO"],
-    "UCITS (Europa)": ["IWDA.L", "EMIM.L", "SPXW.L", "DTLA.L", "VDST.L", "IUIT.L", "IUHC.L", "CBUV.L", "IUSG.DE", "ZPRV.DE", "IUSN.DE"]
-})
-st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>', unsafe_allow_html=True)
+st.subheader("🇪🇺 Diccionario Maestro de Equivalencias UCITS")
 
+ucits_data = [
+    # MAJOR INDICES
+    {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "MSCI World (URTH)", "UCITS Recomendado": "IWDA.L / EUNL.DE"},
+    {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "MSCI Emerging Markets (EEM)", "UCITS Recomendado": "EMIM.L / IS3N.DE"},
+    {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "S&P 500 Equal Weight (RSP)", "UCITS Recomendado": "SPXW.L / XDEW.DE"},
+    
+    # BONDS
+    {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "US Treasury 0-1Y (SHV)", "UCITS Recomendado": "VDST.L / IB01.L"},
+    {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "US Treasury 20Y+ (TLT)", "UCITS Recomendado": "DTLA.L / IDTL.L"},
+    {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "Intl Gov Bonds (BNDX)", "UCITS Recomendado": "VETY.DE / IGLA.L"},
+    
+    # GLOBAL FACTORS
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Large Cap Value (IVE)", "UCITS Recomendado": "CBUV.L / IUSV.DE"},
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Large Cap Growth (IVW)", "UCITS Recomendado": "IUSG.DE / IWYG.L"},
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Small Cap Value (IWN)", "UCITS Recomendado": "ZPRV.DE"},
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Small Cap Growth (IWO)", "UCITS Recomendado": "IUSN.DE (General SC)"},
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Value (VLUE)", "UCITS Recomendado": "IWVL.L"},
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Quality (QUAL)", "UCITS Recomendado": "IWQU.L"},
+    {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Dividend (VYMI)", "UCITS Recomendado": "VHYL.L / VHYD.L"},
+    
+    # US SECTORS
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Technology (XLK)", "UCITS Recomendado": "IUIT.L / QDVE.DE"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Healthcare (XLV)", "UCITS Recomendado": "IUHC.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Financials (XLF)", "UCITS Recomendado": "IUFS.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Cons Discretionary (XLY)", "UCITS Recomendado": "IUCD.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Communication (XLC)", "UCITS Recomendado": "CMTC.L / IUCM.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Industrials (XLI)", "UCITS Recomendado": "IUDS.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Cons Staples (XLP)", "UCITS Recomendado": "IUCG.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Energy (XLE)", "UCITS Recomendado": "IUES.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Utilities (XLU)", "UCITS Recomendado": "IUUS.L"},
+    {"Categoría": "US SECTORS", "ETF (Ticker US)": "Real Estate (XLRE)", "UCITS Recomendado": "IUSP.L"},
+    
+    # ASIA & LATAM
+    {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "Japan (EWJ)", "UCITS Recomendado": "IJPN.L"},
+    {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "South Korea (EWY)", "UCITS Recomendado": "CSKR.L"},
+    {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "India (INDA)", "UCITS Recomendado": "NDIA.L / IIND.L"},
+    {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "China (MCHI)", "UCITS Recomendado": "HMCH.L / ICHN.L"},
+    {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "Brazil (EWZ)", "UCITS Recomendado": "IBZL.AS / IBZL.L"},
+    {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "Mexico (EWW)", "UCITS Recomendado": "CMX1.DE"}
+]
+
+ucits_df = pd.DataFrame(ucits_data)
+
+# Convertir a HTML y meter en el contenedor para que mantenga el estilo visual de la app
+st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>', unsafe_allow_html=True)
 # El manual ahora usa puras etiquetas Markdown nativas de Streamlit para evitar
 # que el código HTML se rompa o se visualice mal en la web.
 st.info("""
