@@ -4,239 +4,256 @@ import pandas as pd
 from datetime import datetime, date
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(layout="wide", page_title="Market Tracker Pro")
+st.set_page_config(layout="wide", page_title="Master Command by PS")
 
-# --- BLOQUE 1: DICCIONARIO MAESTRO DE ACTIVOS ---
+# --- ESTILOS CSS PROFESIONALES (MODO OSCURO Y TERMINAL) ---
+st.markdown("""
+    <style>
+    .stApp { background-color: #0E1117; }
+    div[data-testid="stDataFrame"] { border: none; }
+    .st-emotion-cache-16idsys p { font-size: 14px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- BLOQUE 1: DICCIONARIO MAESTRO (ETFs US e Índices Puros) ---
 ACTIVOS = {
-    "MAJOR INDICES (UCITS)": {
-        "S&P 500": "VUSA.L",
-        "MSCI World": "IWDA.L",
-        "NASDAQ 100": "EQQQ.L",
-        "Euro Stoxx 50": "SX5E.EX",
-        "MSCI Emerging Markets": "EMIM.L",
-        "Russell 2000": "IUSN.DE",
-        "S&P 500 Equal Weight": "SPXW.L"
+    "MAJOR INDICES": {
+        "S&P 500": "^GSPC",
+        "MSCI World": "URTH", # ETF US
+        "NASDAQ 100": "^NDX",
+        "Euro Stoxx 50": "^STOXX50E",
+        "MSCI Emerging Markets": "EEM", # ETF US
+        "Russell 2000": "^RUT",
+        "S&P 500 Equal Weight": "RSP" # ETF US
     },
     "TITANES GLOBALES (15)": {
-        "Apple": "AAPL",
-        "Microsoft": "MSFT",
-        "Alphabet": "GOOGL",
-        "Amazon": "AMZN",
-        "NVIDIA": "NVDA",
-        "Meta Platforms": "META",
-        "Tesla": "TSLA",
-        "Berkshire Hathaway": "BRK-B",
-        "Eli Lilly": "LLY",
-        "JPMorgan Chase": "JPM",
-        "Visa": "V",
-        "Broadcom": "AVGO",
-        "Novo Nordisk": "NOVO-B.CO",
-        "LVMH": "MC.PA",
-        "ASML": "ASML.AS"
+        "Apple": "AAPL", "Microsoft": "MSFT", "Alphabet": "GOOGL",
+        "Amazon": "AMZN", "NVIDIA": "NVDA", "Meta Platforms": "META",
+        "Tesla": "TSLA", "Berkshire Hathaway": "BRK-B", "Eli Lilly": "LLY",
+        "JPMorgan Chase": "JPM", "Visa": "V", "Broadcom": "AVGO",
+        "Novo Nordisk": "NVO", # US ADR para fundamentales completos
+        "LVMH": "LVMUY", # US OTC para fundamentales
+        "ASML": "ASML" # US ADR
     },
     "CURRENCIES": {
-        "EUR / USD": "EURUSD=X",
-        "EUR / GBP": "EURGBP=X",
-        "EUR / JPY": "EURJPY=X"
+        "USD / EUR": "USDEUR=X",
+        "USD / GBP": "USDGBP=X",
+        "USD / JPY": "USDJPY=X"
     },
     "VOLATILITY & RISK": {
         "VIX (S&P 500 Volatility)": "^VIX",
         "V2TX (Euro Stoxx Volatility)": "^V2TX"
     },
-    "BONDS (UCITS)": {
-        "US Treasury 20Y+": "DTLA.L",
-        "US Treasury 0-1Y": "VDST.L",
-        "Euro Gov Bonds": "EUNA.DE",
-        "Euro Corporate IG": "IEAC.L"
+    "BONDS (US ETFs)": {
+        "US Treasury 20Y+": "TLT",
+        "US Treasury 0-1Y": "SHV",
+        "Intl Gov Bonds": "BNDX"
     },
     "COMMODITIES": {
-        "Oil (Brent)": "BZ=F",
-        "Gold (ETC)": "IGLN.L",
-        "Silver (ETC)": "ISLN.L",
-        "Copper": "HG=F",
-        "Bitcoin": "BTC-USD"
+        "Oil (Brent)": "BZ=F", "Gold": "GC=F", "Silver": "SI=F",
+        "Copper": "HG=F", "Bitcoin": "BTC-USD"
     },
-    "GLOBAL FACTORS (UCITS)": {
-        "MSCI World Value": "IWVL.L",
-        "MSCI World Quality": "IWQU.L",
-        "Global Dividend": "VHYL.L"
+    "GLOBAL FACTORS (US ETFs)": {
+        "Value": "VLUE", "Quality": "QUAL", "Dividend": "VYMI"
     },
     "EUROPE": {
-        "UK (FTSE 100)": "^FTSE",
-        "France (CAC 40)": "^FCHI",
-        "Germany (DAX)": "^GDAXI",
-        "Netherlands (AEX)": "^AEX",
-        "Spain (IBEX 35)": "^IBEX",
-        "Italy (FTSE MIB)": "FTSEMIB.MI"
+        "UK (FTSE 100)": "^FTSE", "France (CAC 40)": "^FCHI",
+        "Germany (DAX)": "^GDAXI", "Netherlands (AEX)": "^AEX",
+        "Spain (IBEX 35)": "^IBEX", "Italy (FTSE MIB)": "FTSEMIB.MI"
     },
-    "ASIA (UCITS)": {
-        "Japan": "IJPN.L",
-        "South Korea": "CSKR.L",
-        "India": "NDIA.L",
-        "China": "HMCH.L",
-        "Hong Kong": "^HSI"
-    },
-    "LATAM": {
-        "Brazil": "EWZ",
-        "Mexico": "EWW",
-        "MSCI EM LatAm": "LTAM.L",
+    "ASIA & LATAM (US ETFs)": {
+        "Japan": "EWJ", "South Korea": "EWY", "India": "INDA",
+        "China": "MCHI", "Brazil": "EWZ", "Mexico": "EWW",
         "Argentina (Merval USD CCL)": "MERVAL_USD" 
     },
-    "US SECTORS (UCITS)": {
-        "Technology": "IUIT.L",
-        "Healthcare": "IUHC.L",
-        "Financials": "IUFS.L",
-        "Cons Discretionary": "IUCD.L",
-        "Communication": "CMTC.L",
-        "Industrials": "IUDS.L",
-        "Cons Staples": "IUCG.L",
-        "Energy": "IUES.L",
-        "Utilities": "IUUS.L",
-        "Real Estate": "IUSP.L"
-    },
-    "EU SECTORS (UCITS)": {
-        "EU Banks": "EXV1.DE",
-        "EU Healthcare": "EXV4.DE",
-        "EU Industrials": "EXV6.DE",
-        "EU Energy": "EXV5.DE",
-        "EU Technology": "EXV3.DE",
-        "EU Cons Staples": "EXV9.DE",
-        "EU Telecoms": "EXV2.DE",
-        "EU Utilities": "EXV7.DE",
-        "EU Materials": "EXV8.DE",
-        "EU Real Estate": "EXI5.DE"
+    "US SECTORS (US ETFs)": {
+        "Technology": "XLK", "Healthcare": "XLV", "Financials": "XLF",
+        "Cons Discretionary": "XLY", "Communication": "XLC", "Industrials": "XLI",
+        "Cons Staples": "XLP", "Energy": "XLE", "Utilities": "XLU", "Real Estate": "XLRE"
     }
 }
 
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: MOTOR DE DATOS BLINDADO ---
+# --- BLOQUE 2: MOTOR DE DATOS ---
 @st.cache_data(ttl=300) 
-def obtener_datos():
+def obtener_precios():
     all_tickers = []
     for categoria in ACTIVOS.values():
         all_tickers.extend(list(categoria.values()))
-    
-    if "MERVAL_USD" in all_tickers:
-        all_tickers.remove("MERVAL_USD")
-        
+    if "MERVAL_USD" in all_tickers: all_tickers.remove("MERVAL_USD")
     all_tickers.extend(TICKERS_AUXILIARES)
     all_tickers = list(set(all_tickers)) 
     
     try:
-        # Descarga con auto_adjust=False para garantizar que la estructura no cambie
         data = yf.download(all_tickers, period="10y", interval="1d", auto_adjust=False)
         
-        # Corrección para la nueva versión de yfinance (manejo de MultiIndex)
+        # Extracción de precios y volumen
         if isinstance(data.columns, pd.MultiIndex):
-            if 'Adj Close' in data.columns.levels[0]:
-                df = data['Adj Close']
-            else:
-                df = data['Close']
+            df_precios = data['Adj Close'] if 'Adj Close' in data.columns.levels[0] else data['Close']
+            df_volumen = data['Volume']
         else:
-            df = data
+            df_precios = data
+            df_volumen = pd.DataFrame()
             
-        # ESTO ES VITAL: Limpia la zona horaria y fuerza todas las fechas a las 00:00:00
-        df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
+        df_precios.index = pd.to_datetime(df_precios.index).tz_localize(None).normalize()
+        if not df_volumen.empty:
+            df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
-        # Lógica CCL Argentina
-        merv = df['^MERV'].ffill()
-        ggal_ba = df['GGAL.BA'].ffill() 
-        ggal_us = df['GGAL'].ffill()    
+        merv = df_precios['^MERV'].ffill()
+        ggal_ba = df_precios['GGAL.BA'].ffill() 
+        ggal_us = df_precios['GGAL'].ffill()    
         
         ccl = ggal_ba / (ggal_us * 10)
-        df['MERVAL_USD'] = merv / ccl
+        df_precios['MERVAL_USD'] = merv / ccl
         
-        return df
+        return df_precios, df_volumen
     except Exception as e:
-        # Si Yahoo rechaza la conexión, devolvemos un dataframe vacío para disparar la alerta
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
-# --- BLOQUE 3: CÁLCULO DE MÉTRICAS CON FILTRO EXACTO ---
-def calcular_metricas(df, ticker, nombre, fecha_ref):
-    # Verificamos si el ticker realmente existe en la descarga
-    if ticker not in df.columns:
-        raise ValueError("Ticker no disponible")
+@st.cache_data(ttl=3600) # Fundamentales cacheados por 1 hora
+def obtener_fundamentales(ticker):
+    # Solo buscamos fundamentales si no es un índice puro o divisa
+    if ticker.startswith("^") or "=" in ticker or ticker == "MERVAL_USD" or "-" in ticker and ticker != "BTC-USD":
+        return {}
+    try:
+        info = yf.Ticker(ticker).info
+        return {
+            "PE": info.get("trailingPE", "-"),
+            "Beta": info.get("beta", "-"),
+            "Target": info.get("targetMeanPrice", "-"),
+            "EPS": info.get("trailingEps", "-"),
+            "Rec": info.get("recommendationKey", "-").replace("_", " ").title()
+        }
+    except:
+        return {}
 
-    # Forzamos la fecha del calendario a las 00:00:00 para que coincida perfecto con Yahoo
+@st.cache_data(ttl=3600)
+def obtener_opciones_titanes(tickers_titanes):
+    resultados = []
+    for ticker in tickers_titanes:
+        try:
+            tk = yf.Ticker(ticker)
+            expirations = tk.options
+            if expirations:
+                # Tomamos el vencimiento más cercano
+                opt = tk.option_chain(expirations[0])
+                puts_oi = opt.puts['openInterest'].sum()
+                calls_oi = opt.calls['openInterest'].sum()
+                vol_puts = opt.puts['volume'].sum()
+                vol_calls = opt.calls['volume'].sum()
+                
+                ratio_oi = puts_oi / calls_oi if calls_oi > 0 else 0
+                
+                resultados.append({
+                    "Titan": ticker,
+                    "Vencimiento": expirations[0],
+                    "Put/Call Ratio (OI)": round(ratio_oi, 2),
+                    "Total Puts (Vol)": vol_puts,
+                    "Total Calls (Vol)": vol_calls
+                })
+        except:
+            continue
+    return pd.DataFrame(resultados)
+
+# --- BLOQUE 3: CÁLCULO DE MÉTRICAS ---
+def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, es_hoy):
+    if ticker not in df_precios.columns: raise ValueError("Sin datos")
+
     fecha_pandas = pd.to_datetime(fecha_ref).normalize()
+    serie_precios = df_precios[ticker].loc[:fecha_pandas].dropna()
     
-    # Cortamos la historia
-    serie = df[ticker].loc[:fecha_pandas].dropna()
+    if serie_precios.empty: raise ValueError("Sin datos")
+    precio_actual = serie_precios.iloc[-1]
     
-    if serie.empty:
-        raise ValueError("Sin datos para esta fecha")
-        
-    precio_actual = serie.iloc[-1]
-    fecha_precio_real = serie.index[-1].strftime('%d-%m-%Y') 
+    def format_pct(val):
+        return f"{round(val, 2)}%" if isinstance(val, (int, float)) else "-"
     
     def pct_change(days):
         try:
-            inicio = serie.iloc[-days]
+            inicio = serie_precios.iloc[-days]
             return ((precio_actual - inicio) / inicio) * 100
-        except: return 0.0
+        except: return "-"
 
     try:
-        inicio_anio = serie.loc[serie.index.year == fecha_pandas.year].iloc[0]
+        inicio_anio = serie_precios.loc[serie_precios.index.year == fecha_pandas.year].iloc[0]
         ytd = ((precio_actual - inicio_anio) / inicio_anio) * 100
-    except:
-        ytd = 0.0
+    except: ytd = "-"
     
     try:
-        ultimo_anio = serie.iloc[-252:]
-        high_52w = ((precio_actual - ultimo_anio.max()) / ultimo_anio.max()) * 100
-        low_52w = ((precio_actual - ultimo_anio.min()) / ultimo_anio.min()) * 100
+        ultimo_anio = serie_precios.iloc[-252:]
+        high_52w = round(ultimo_anio.max(), 2)
+        low_52w = round(ultimo_anio.min(), 2)
     except:
-        high_52w, low_52w = 0.0, 0.0
+        high_52w, low_52w = "-", "-"
+
+    # Volumen Relativo (Solo si es hoy)
+    vol_pct_str = "-"
+    if es_hoy and not df_volumen.empty and ticker in df_volumen.columns:
+        serie_vol = df_volumen[ticker].loc[:fecha_pandas].dropna()
+        if len(serie_vol) >= 63: # ~3 meses
+            vol_hoy = serie_vol.iloc[-1]
+            vol_promedio_3m = serie_vol.iloc[-63:].mean()
+            if vol_promedio_3m > 0:
+                vol_pct = ((vol_hoy / vol_promedio_3m) - 1) * 100
+                vol_pct_str = format_pct(vol_pct)
+
+    # Fundamentales (Solo si es hoy)
+    fund = obtener_fundamentales(ticker) if es_hoy else {}
 
     return {
         "Nombre": nombre,
-        "Ticker": ticker,
         "Precio": round(precio_actual, 2),
-        "Fecha Ref.": fecha_precio_real, 
-        "Low 52W": f"{round(low_52w, 1)}%",
-        "High 52W": f"{round(high_52w, 1)}%",
-        "1D": round(serie.pct_change().iloc[-1] * 100, 2),
-        "1W": round(pct_change(5), 2),
-        "1M": round(pct_change(21), 2),
-        "YTD": round(ytd, 2),
-        "1Y": round(pct_change(252), 2),
-        "3Y": round(pct_change(756), 2)
+        "Low 52W": low_52w,
+        "High 52W": high_52w,
+        "1D": format_pct(pct_change(1)),
+        "1W": format_pct(pct_change(5)),
+        "1M": format_pct(pct_change(21)),
+        "YTD": format_pct(ytd),
+        "1Y": format_pct(pct_change(252)),
+        "3Y": format_pct(pct_change(756)),
+        "P/E": round(fund.get("PE", "-"), 2) if isinstance(fund.get("PE"), (int, float)) else fund.get("PE", "-"),
+        "Beta": round(fund.get("Beta", "-"), 2) if isinstance(fund.get("Beta"), (int, float)) else fund.get("Beta", "-"),
+        "Target P.": round(fund.get("Target", "-"), 2) if isinstance(fund.get("Target"), (int, float)) else fund.get("Target", "-"),
+        "% Vol vs 3M": vol_pct_str,
+        "BPA (TTM)": round(fund.get("EPS", "-"), 2) if isinstance(fund.get("EPS"), (int, float)) else fund.get("EPS", "-"),
+        "Rec.": fund.get("Rec", "-")
     }
 
-# --- BLOQUE 4: MOTOR VISUAL Y RENDERING ---
-st.title("📊 Global Market & Macro Tracker")
-
-col1, col2 = st.columns([1, 3])
-with col1:
+# --- BLOQUE 4: INTERFAZ MASTER COMMAND ---
+col_title, col_cal = st.columns([2, 1])
+with col_title:
+    st.title("🛡️ Master Command by PS")
+with col_cal:
+    st.write("") # Espaciador
     fecha_seleccionada = st.date_input(
-        "🗓️ Seleccionar Fecha de Análisis", 
+        "🗓️ Fecha de Cálculo", 
         value=date.today(), 
-        max_value=date.today() 
+        max_value=date.today()
     )
 
-st.caption(f"Calculando rentabilidades respecto a los precios de cierre del: {fecha_seleccionada.strftime('%d-%m-%Y')}")
+es_hoy = fecha_seleccionada == date.today()
 
 def color_heatmap(val):
-    try:
-        val = float(val)
-        if val > 3: color = '#1E7B1E' 
-        elif val > 1: color = '#228B22' 
-        elif val > 0: color = '#90EE90' 
-        elif val < -3: color = '#8B0000' 
-        elif val < -1: color = '#FF4500' 
-        elif val < 0: color = '#FFB6C1' 
-        else: color = 'transparent'
-        return f'background-color: {color}; color: {"white" if abs(val) > 1 else "black"}'
-    except:
-        return ''
+    if isinstance(val, str) and "%" in val:
+        try:
+            num = float(val.replace("%", ""))
+            if num > 3: color = '#1E7B1E' 
+            elif num > 1: color = '#228B22' 
+            elif num > 0: color = '#3CB371' 
+            elif num < -3: color = '#8B0000' 
+            elif num < -1: color = '#B22222' 
+            elif num < 0: color = '#CD5C5C' 
+            else: color = 'transparent'
+            return f'background-color: {color}; color: white'
+        except: return ''
+    return ''
 
-with st.spinner(f'Procesando mercado y calculando métricas históricas al {fecha_seleccionada.strftime("%d-%m-%Y")}...'):
-    precios = obtener_datos()
+with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
+    df_precios, df_volumen = obtener_precios()
     
-    # SISTEMA ANTI-PANTALLA BLANCA
-    if precios.empty:
-        st.error("🚨 Error Crítico: No se pudieron descargar los datos. Yahoo Finance podría estar bloqueando temporalmente la conexión desde el servidor. Intenta actualizar la página en unos minutos.")
+    if df_precios.empty:
+        st.error("🚨 Error de conexión con el proveedor de datos.")
     else:
         for categoria, items in ACTIVOS.items():
             st.subheader(categoria)
@@ -244,17 +261,36 @@ with st.spinner(f'Procesando mercado y calculando métricas históricas al {fech
             
             for nombre, ticker in items.items():
                 try:
-                    metrica = calcular_metricas(precios, ticker, nombre, fecha_seleccionada)
+                    metrica = calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_seleccionada, es_hoy)
                     lista_resultados.append(metrica)
-                except Exception as e:
-                    continue
+                except: continue
             
             if lista_resultados:
                 df_display = pd.DataFrame(lista_resultados)
                 st.dataframe(
-                    df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
+                    df_display.style.applymap(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
                     hide_index=True,
                     use_container_width=True
                 )
+
+        # MÓDULO DE POSICIÓN ABIERTA (Solo se muestra si la fecha es hoy)
+        if es_hoy:
+            st.markdown("---")
+            st.subheader("🔥 Sentimiento Institucional Opciones (Titanes Globales)")
+            st.caption("Ratio mayor a 1.0 = Sentimiento Bajista/Cobertura. Menor a 1.0 = Sentimiento Alcista.")
+            tickers_titanes = list(ACTIVOS["TITANES GLOBALES (15)"].values())
+            df_opciones = obtener_opciones_titanes(tickers_titanes)
+            if not df_opciones.empty:
+                st.dataframe(df_opciones, hide_index=True, use_container_width=True)
             else:
-                st.warning(f"No hay datos disponibles para la categoría: {categoria} en la fecha seleccionada.")
+                st.info("Datos de cadena de opciones no disponibles en este momento.")
+
+# --- BLOQUE 5: TABLA DE EQUIVALENCIAS UCITS ---
+st.markdown("---")
+st.subheader("🇪🇺 Tabla de Equivalencias: US ETFs a UCITS (Europa)")
+ucits_data = {
+    "Activo / Exposición": ["MSCI World", "Emerging Markets", "S&P 500 Equal Weight", "US Treasury 20Y+", "US Treasury 0-1Y", "US Technology", "US Healthcare"],
+    "US Ticker (Usado)": ["URTH", "EEM", "RSP", "TLT", "SHV", "XLK", "XLV"],
+    "UCITS Equivalente (EUR)": ["IWDA.L / EUNL.DE", "EMIM.L", "SPXW.L / XDEW.DE", "DTLA.L", "VDST.L", "IUIT.L", "IUHC.L"]
+}
+st.table(pd.DataFrame(ucits_data))
