@@ -10,7 +10,6 @@ st.set_page_config(layout="wide", page_title="Master Command by PS")
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
-    h1 { text-align: right; }
     
     .table-container {
         width: 100%;
@@ -56,7 +55,7 @@ st.markdown("""
     }
     
     .table-container td:first-child {
-        background-color: #161a21; 
+        background-color: #161a21;
     }
 
     .table-container th:first-child {
@@ -109,7 +108,7 @@ ACTIVOS = {
     },
     "COMMODITIES": {
         "Oil Brent (BZ=F)": "BZ=F", "Gold (GC=F)": "GC=F", "Silver (SI=F)": "SI=F",
-        "Gold / Silver Ratio (GSR)": "GSR", # Nuevo activo sintético
+        "Gold / Silver Ratio (GSR)": "GSR",
         "Copper (HG=F)": "HG=F", "Soybeans (ZS=F)": "ZS=F", "Bitcoin (BTC-USD)": "BTC-USD"
     },
     "GLOBAL FACTORS (US ETFs)": {
@@ -133,23 +132,13 @@ ACTIVOS = {
 
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: LÓGICA DE TRADINGVIEW CORREGIDA ---
+# --- BLOQUE 2: LÓGICA DE TRADINGVIEW ---
 def get_tv_url(ticker):
-    # Diccionario de equivalencias exactas entre Yahoo Finance y TradingView
     tv_mapping = {
-        "^GSPC": "SPX",
-        "^NDX": "NDX",
-        "^DJI": "DJI",
-        "^FTSE": "UKX",
-        "^IBEX": "IBC",
-        "^GDAXI": "DAX",
-        "^STOXX50E": "STOXX50",
-        "^VIX": "VIX",
-        "^IRX": "US03MY",  # Tasa 3 meses en TV
-        "^FVX": "US05Y",   # Tasa 5 años en TV
-        "^TNX": "US10Y",   # Tasa 10 años en TV
-        "^TYX": "US30Y",   # Tasa 30 años en TV
-        "GSR": "XAUXAG"    # Gold/Silver Ratio en TV
+        "^GSPC": "SPX", "^NDX": "NDX", "^DJI": "DJI", "^FTSE": "UKX",
+        "^IBEX": "IBC", "^GDAXI": "DAX", "^STOXX50E": "STOXX50",
+        "^VIX": "VIX", "^IRX": "US03MY", "^FVX": "US05Y", "^TNX": "US10Y",
+        "^TYX": "US30Y", "GSR": "XAUXAG"
     }
     
     if ticker in tv_mapping:
@@ -157,23 +146,17 @@ def get_tv_url(ticker):
     elif "MERVAL" in ticker:
         symbol = "MERV"
     else:
-        # Limpiamos el sufijo de las divisas sin borrar letras estructurales
-        symbol = ticker.replace('=X', '')
-        symbol = symbol.replace('=F', '')
-        # Limpiamos guiones (ej. BTC-USD -> BTCUSD)
-        symbol = symbol.replace('-', '')
-        # Limpiamos el acento circunflejo si quedó alguno
-        symbol = symbol.replace('^', '')
+        symbol = ticker.replace('=X', '').replace('=F', '').replace('-', '').replace('^', '')
         
     return f"https://www.tradingview.com/chart/?symbol={symbol}"
 
-# --- BLOQUE 3: MOTOR DE DATOS (YAHOO Y NATIVO FRED) ---
-@st.cache_data(ttl=300) 
+# --- BLOQUE 3: MOTOR DE DATOS CACHEADO ---
+# Memoria caché estricta de 24 horas (86400 segundos)
+@st.cache_data(ttl=86400) 
 def obtener_precios():
     all_tickers = []
     for cat in ACTIVOS.values(): all_tickers.extend(list(cat.values()))
     
-    # Excluimos los activos sintéticos para que Yahoo no devuelva error
     if "MERVAL_USD" in all_tickers: all_tickers.remove("MERVAL_USD")
     if "GSR" in all_tickers: all_tickers.remove("GSR")
         
@@ -192,18 +175,19 @@ def obtener_precios():
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
-        # Cálculo del CCL Merval
         merv, ggal_ba, ggal_us = df_precios['^MERV'].ffill(), df_precios['GGAL.BA'].ffill(), df_precios['GGAL'].ffill()    
         df_precios['MERVAL_USD'] = merv / (ggal_ba / (ggal_us * 10))
         
-        # Cálculo sintético del Gold/Silver Ratio (GSR)
         if 'GC=F' in df_precios.columns and 'SI=F' in df_precios.columns:
             df_precios['GSR'] = df_precios['GC=F'] / df_precios['SI=F']
             
-        return df_precios, df_volumen
-    except: return pd.DataFrame(), pd.DataFrame()
+        # Marca de tiempo de la última descarga exitosa
+        hora_actualizacion = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+            
+        return df_precios, df_volumen, hora_actualizacion
+    except: return pd.DataFrame(), pd.DataFrame(), None
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)
 def obtener_macro_fred():
     try:
         def fetch_fred(series_id):
@@ -242,9 +226,8 @@ def obtener_macro_fred():
     except Exception as e: 
         return None
 
-@st.cache_data(ttl=3600) 
+@st.cache_data(ttl=86400) 
 def obtener_fundamentales(ticker):
-    # Excluimos explícitamente el GSR para no buscar fundamentales de un ratio
     if ticker.startswith("^") or "=" in ticker or ticker in ["MERVAL_USD", "GSR"] or ("-" in ticker and ticker != "BTC-USD"): return {}
     try:
         info = yf.Ticker(ticker).info
@@ -254,6 +237,7 @@ def obtener_fundamentales(ticker):
         }
     except: return {}
 
+# Motor de Opciones Blindado con Try/Except por cada métrica
 @st.cache_data(ttl=3600)
 def obtener_opciones_titanes(tickers_titanes):
     resultados = []
@@ -263,13 +247,27 @@ def obtener_opciones_titanes(tickers_titanes):
             exp = tk.options
             if exp:
                 opt = tk.option_chain(exp[0])
-                p_oi, c_oi = opt.puts['openInterest'].sum(), opt.calls['openInterest'].sum()
-                v_p, v_c = opt.puts['volume'].sum(), opt.calls['volume'].sum()
+                puts = opt.puts
+                calls = opt.calls
+                
+                # Validación segura contra NaN o datos corruptos
+                p_oi = puts['openInterest'].sum() if 'openInterest' in puts else 0
+                c_oi = calls['openInterest'].sum() if 'openInterest' in calls else 0
+                
+                if pd.isna(p_oi): p_oi = 0
+                if pd.isna(c_oi): c_oi = 0
+                
+                ratio = round(p_oi/c_oi, 2) if c_oi > 0 else 0
+                
                 resultados.append({
-                    "Titan": t, "Vencimiento": exp[0], "Put/Call Ratio": round(p_oi/c_oi, 2) if c_oi>0 else 0,
-                    "Puts (OI)": int(p_oi), "Calls (OI)": int(c_oi), "Puts (Vol)": int(v_p), "Calls (Vol)": int(v_c)
+                    "Titan": t, 
+                    "Vencimiento": exp[0], 
+                    "Put/Call Ratio": ratio,
+                    "Puts (OI)": int(p_oi), 
+                    "Calls (OI)": int(c_oi)
                 })
-        except: continue
+        except Exception: 
+            continue
     return pd.DataFrame(resultados)
 
 # --- BLOQUE 4: CÁLCULO DE MÉTRICAS QUANTITATIVAS ---
@@ -291,12 +289,6 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     
     try: h52, l52 = f"{serie_p.iloc[-252:].max():.2f}", f"{serie_p.iloc[-252:].min():.2f}"
     except: h52, l52 = "-", "-"
-
-    vol_pct = "-"
-    if es_a and not df_volumen.empty and ticker in df_volumen.columns:
-        s_vol = df_volumen[ticker].loc[:fecha_p].dropna()
-        if len(s_vol) >= 63 and s_vol.iloc[-63:].mean() > 0: 
-            vol_pct = format_pct(((s_vol.iloc[-1] / s_vol.iloc[-63:].mean()) - 1) * 100)
 
     rsi_val, sma200_dist, mdd_val = "-", "-", "-"
     try:
@@ -326,14 +318,28 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
         "P/E": f"{fund.get('PE'):.2f}" if isinstance(fund.get('PE'), (int,float)) else "-",
         "Beta": f"{fund.get('Beta'):.2f}" if isinstance(fund.get('Beta'), (int,float)) else "-",
         "Target": f"{fund.get('Target'):.2f}" if isinstance(fund.get('Target'), (int,float)) else "-",
-        "Vol vs 3M": vol_pct, "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-",
+        "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-",
         "Rec.": fund.get("Rec", "-")
     }
 
 # --- BLOQUE 5: INTERFAZ Y RENDERIZADO ---
-col_cal, col_title = st.columns([1, 2])
-with col_cal: fecha_sel = st.date_input("🗓️ Fecha de Cálculo", value=date.today(), max_value=date.today())
-with col_title: st.title("🛡️ Master Command by PS")
+
+# Layout Invertido: Título a la izquierda, Controles a la derecha
+col_title, col_cal = st.columns([2, 1])
+
+df_p, df_v, hora_act = obtener_precios()
+
+with col_title: 
+    st.title("🛡️ Master Command")
+    if hora_act:
+        st.caption(f"Última lectura del mercado: **{hora_act}** (Hora del Servidor)")
+        
+with col_cal: 
+    st.write("") # Espaciador
+    fecha_sel = st.date_input("🗓️ Fecha de Cálculo Histórico", value=date.today(), max_value=date.today())
+    if st.button("🔄 Actualizar Datos Ahora"):
+        st.cache_data.clear()
+        st.rerun()
 
 def color_heatmap(val):
     if isinstance(val, str) and "%" in val:
@@ -350,8 +356,7 @@ def color_heatmap(val):
         except: return ''
     return ''
 
-with st.spinner('Procesando algoritmos y radar macroeconómico...'):
-    df_p, df_v = obtener_precios()
+with st.spinner('Validando caché y procesando matemáticas en memoria...'):
     macro_data = obtener_macro_fred()
 
     if macro_data:
@@ -384,7 +389,8 @@ with st.spinner('Procesando algoritmos y radar macroeconómico...'):
                 st.subheader("🕸️ Matriz de Correlación (1 Año)")
                 try:
                     titanes_tickers = list(ACTIVOS["TITANES GLOBALES (15)"].values())
-                    corr_matrix = df_p[titanes_tickers].iloc[-252:].pct_change().corr()
+                    existentes = [t for t in titanes_tickers if t in df_p.columns]
+                    corr_matrix = df_p[existentes].iloc[-252:].pct_change().dropna(how='all').corr()
                     nombres_cortos = {v: k.split(" ")[0] for k, v in ACTIVOS["TITANES GLOBALES (15)"].items()}
                     corr_matrix = corr_matrix.rename(columns=nombres_cortos, index=nombres_cortos)
                     html_corr = corr_matrix.style.background_gradient(cmap='coolwarm', axis=None, vmin=-1, vmax=1).format("{:.2f}").to_html()
@@ -397,47 +403,50 @@ with st.spinner('Procesando algoritmos y radar macroeconómico...'):
                 if not df_opt.empty:
                     df_opt['Titan'] = df_opt['Titan'].map(lambda x: nombres_cortos.get(x, x))
                     st.markdown(f'<div class="table-container">{df_opt.to_html(index=False)}</div>', unsafe_allow_html=True)
-                else: st.info("Cadena de opciones no disponible.")
+                else: st.info("La API de Yahoo no reporta contratos abiertos en este momento.")
 
 # --- BLOQUE 6: EQUIVALENCIAS Y GLOSARIO ---
 st.markdown("---")
-st.subheader("🇪🇺 US ETFs a UCITS")
+st.subheader("🇪🇺 Equivalencias UCITS")
 ucits_df = pd.DataFrame({
     "Ticker US": ["URTH", "EEM", "RSP", "TLT", "SHV", "XLK", "XLV", "IVE", "IVW", "IWN", "IWO"],
-    "UCITS": ["IWDA.L", "EMIM.L", "SPXW.L", "DTLA.L", "VDST.L", "IUIT.L", "IUHC.L", "CBUV.L", "IUSG.DE", "ZPRV.DE", "IUSN.DE"]
+    "UCITS (Europa)": ["IWDA.L", "EMIM.L", "SPXW.L", "DTLA.L", "VDST.L", "IUIT.L", "IUHC.L", "CBUV.L", "IUSG.DE", "ZPRV.DE", "IUSN.DE"]
 })
 st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>', unsafe_allow_html=True)
 
+# --- MANUAL DE INTERPRETACIÓN MEJORADO ---
 st.markdown("""
 <div style="background-color: #1E1E24; padding: 20px; border-radius: 8px; border-left: 5px solid #2962FF; margin-top: 20px;">
-    <h4>📚 Manual de Interpretación Quant & Macro</h4>
-    <p>Has incorporado métricas de grado institucional. Aquí tienes la guía rápida para operar con ellas:</p>
+    <h4>📚 Manual de Interpretación Analítica Avanzada</h4>
+    <p>Este tablero no solo monitoriza el mercado, sino que evalúa la salud estructural, el sentimiento oculto y los riesgos asimétricos de la cartera basándose en modelos cuantitativos.</p>
+    
+    <h5>1. Posicionamiento Macro y Liquidez (El Motor del Mercado)</h5>
     <ul>
-        <li><b>Radar Macro (FRED):</b> El "Motor" del mercado. 
+        <li><b>Balance de la FED (Liquidez):</b> Es la variable más correlacionada con los mercados alcistas desde 2008. Si la variación es <span style="color:#90EE90">Verde (+)</span>, hay nueva liquidez entrando al sistema; el dinero buscará riesgo (Acciones, Bitcoin). Si es <span style="color:#FFB6C1">Rojo (-)</span>, el entorno es restrictivo y los rebotes del mercado suelen ser frágiles.</li>
+        <li><b>Gold/Silver Ratio (GSR):</b> Ratio de aversión al riesgo global. Un valor <b>superior a 80</b> indica estrés financiero severo o deflación (el capital huye hacia la seguridad del oro). Un valor <b>inferior a 60</b> señala crecimiento económico, inflación industrial y apetito por el riesgo (la plata se encarece).</li>
+    </ul>
+
+    <h5>2. Análisis Táctico e Indicadores Cuantitativos</h5>
+    <ul>
+        <li><b>RSI (Índice de Fuerza Relativa a 14 Días):</b> Mide la sobreextensión direccional del precio.
             <ul>
-                <li><i>Balance FED (Liquidez):</i> Si es verde (+), la FED inyecta dinero (combustible para las acciones y Bitcoin). Si es rojo (-), retiran liquidez, aumentando el riesgo de corrección.</li>
-                <li><i>Tasa Desempleo:</i> Si sube rápidamente, el mercado anticipa recesión.</li>
+                <li><i>> 70 (Sobrecompra):</i> Euforia de corto plazo. Vulnerable a correcciones técnicas inminentes.</li>
+                <li><i>< 30 (Sobreventa):</i> Pánico de corto plazo. Suele presentar zonas de entrada de alta probabilidad estadística (rebote técnico).</li>
             </ul>
         </li>
-        <li><b>RSI (14) - Índice de Fuerza Relativa:</b> Mide la velocidad de los cambios de precio de 0 a 100. 
+        <li><b>SMA 200 Dist. (Distancia a la Media Móvil 200):</b> La gravedad del mercado. Si un activo se desvía más de un +15% a +25% de su media móvil de 200 días, la "goma elástica" está al máximo de su capacidad. Comprar en estos niveles reduce drásticamente el ratio riesgo/beneficio.</li>
+        <li><b>MDD 1Y (Máximo Drawdown):</b> La caída más profunda desde el máximo relativo de los últimos 12 meses. Es el verdadero medidor del "Riesgo de Ruina". Permite dimensionar la volatilidad estructural de un activo para ajustar el tamaño de la posición.</li>
+    </ul>
+
+    <h5>3. Dinámica Institucional (Opciones y Correlación)</h5>
+    <ul>
+        <li><b>Matriz de Correlación (1 Año):</b> Revela el grado de diversificación real. Valores superiores a <b>+0.85 (Rojo)</b> significan que posees el mismo factor de riesgo bajo diferentes nombres. Valores <b>Negativos (Azul)</b> actúan como anclas estabilizadoras de la volatilidad del portafolio.</li>
+        <li><b>Sentimiento de Opciones (Put/Call Ratio):</b> Mide las apuestas direccionales del capital institucional.
             <ul>
-                <li><i>Sobrecomprado (>70):</i> El activo ha subido demasiado rápido; alto riesgo de corrección.</li>
-                <li><i>Sobrevendido (<30):</i> El activo ha caído con fuerza; posible oportunidad de rebote.</li>
+                <li><i>Lectura Clásica:</i> Un ratio > 1.0 implica más Puts abiertas (miedo/cobertura bajista). Un ratio < 1.0 indica más Calls (apetito alcista).</li>
+                <li><i>Lectura Contrarian (Gamma Squeeze):</i> Cuando el ratio Put/Call es extremadamente bajo (ej. 0.40) junto con un RSI elevado, los creadores de mercado (Market Makers) están sobrecargados; la estructura está madura para un barrido de liquidez violento a la baja.</li>
             </ul>
         </li>
-        <li><b>SMA 200 Dist. (Distancia a la Media Móvil):</b> Porcentaje de desviación respecto a los últimos 200 días.
-            <ul>
-                <li><i>Positivo Alto (>15-20%):</i> Tendencia alcista muy fuerte, pero la "goma elástica" está tensa. Precaución con compras nuevas.</li>
-            </ul>
-        </li>
-        <li><b>MDD 1Y (Máximo Drawdown):</b> La peor caída desde el pico más alto en los últimos 12 meses. Mide el "dolor" histórico. Si el MDD es -35%, quien compró en la cima perdió un 35% antes de recuperarse.</li>
-        <li><b>Matriz de Correlación (coolwarm heatmap):</b> Evalúa la diversificación real (-1 a 1).
-            <ul>
-                <li><i>Rojo Intenso (+0.8 a 1.0):</i> Se mueven casi igual. Poseer ambos no reduce tu riesgo.</li>
-                <li><i>Azul Intenso (Negativo):</i> Se mueven de forma inversa. Sirven de cobertura (hedge).</li>
-            </ul>
-        </li>
-        <li><b>Gold/Silver Ratio (GSR):</b> Cuántas onzas de plata se necesitan para comprar una de oro. Picos altos (>80) suelen indicar recesión o pánico estructural, mientras que valles (<50) sugieren expansión económica e inflación.</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
