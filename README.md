@@ -1,63 +1,32 @@
-# 📊 Market Tracker Pro
+# 🛡️ Master Command by PS
 
-Un tablero de control financiero (Dashboard) interactivo y en tiempo real, diseñado para monitorear el estado macroeconómico y los mercados globales. 
-
-Esta herramienta está optimizada para el acceso desde Europa, utilizando ETFs en formato UCITS, y cuenta con una función especial para calcular el valor real del mercado argentino mediante el tipo de cambio Contado Con Liquidación (CCL).
-
-
-
----
+**Master Command** es un terminal financiero y cuantitativo de código abierto construido con Python y Streamlit. Diseñado con una arquitectura de grado institucional, permite monitorizar los mercados globales, evaluar riesgos estructurales de cartera, analizar liquidez macroeconómica y medir el sentimiento del mercado de opciones en tiempo real.
 
 ## 🚀 Características Principales
 
-* **Seguimiento UCITS:** Los índices globales, sectores y bonos están configurados utilizando tickers de ETFs europeos (cotizados en Londres, Xetra, etc.), reflejando el acceso real y los horarios de mercado europeos.
-* **Titanes Globales:** Monitoreo en tiempo real de las 15 empresas más influyentes del mundo, combinando las grandes tecnológicas de EE. UU. (Las 7 Magníficas) con líderes europeos (LVMH, ASML, Novo Nordisk) y gigantes de sectores defensivos y financieros.
-* **Cálculo de Merval en USD (CCL):** El sistema extrae el índice Merval en pesos y lo divide automáticamente por el tipo de cambio implícito (calculado en tiempo real usando la cotización local y el ADR de Grupo Galicia en Nueva York) para mostrar el rendimiento real en moneda dura.
-* **Mapa de Calor Visual (Heatmap):** Formato condicional de colores que imita los terminales profesionales, permitiendo identificar rápidamente tendencias diarias, semanales, mensuales y anuales.
-* **Indicadores Macro:** Integración de divisas clave (EUR/USD), materias primas estratégicas (Cobre, Petróleo, Oro) y medidores de volatilidad (VIX y V2TX).
+* **Radar Macroeconómico (FED):** Conexión directa con la base de datos de la Reserva Federal (FRED) para monitorizar inyecciones de liquidez (Balance de la FED), Tasas de Interés, Inflación (CPI) y Desempleo.
+* **Análisis Cuantitativo Integrado:** Cálculo en tiempo real de métricas de riesgo y momentum:
+  * RSI (Índice de Fuerza Relativa a 14 días).
+  * Distancia porcentual a la Media Móvil de 200 días (SMA 200).
+  * Máximo Drawdown (MDD) a 1 año.
+* **Matriz de Correlación:** Mapa de calor algorítmico que cruza el rendimiento anual de los "Titanes Globales" para evaluar la verdadera diversificación de la cartera.
+* **Sentimiento Institucional (Opciones):** Extracción automatizada de la Cadena de Opciones para calcular el ratio Put/Call y la Posición Abierta (Open Interest).
+* **Fundamentales Forward y Precios:** Datos actualizados de P/E, BPA (EPS), Beta, Precios Objetivo y Volumen Relativo vs. media de 3 meses.
+* **"Máquina del Tiempo" (Análisis Histórico):** Motor de recálculo que permite seleccionar fechas pasadas y reajustar todas las rentabilidades porcentuales (1D, 1W, 1M, YTD, 1Y, 3Y) relativas a ese día específico.
+* **UX/UI Profesional:** Diseño de terminal oscuro (Dark Mode), mapa de calor visual para rendimientos, encabezados y columnas congeladas (Sticky Columns) y enlaces automáticos a los gráficos de *TradingView*.
+* **Soporte Europeo (UCITS):** Diccionario integrado de equivalencias entre ETFs del mercado estadounidense e instrumentos UCITS europeos.
 
----
+## 📡 Arquitectura de Datos (APIs)
 
-## 📂 Estructura de Archivos
+El tablero se alimenta de forma automatizada mediante librerías de extracción de datos públicos:
+1. **Yahoo Finance (`yfinance`):** Utilizado para descargar hasta 10 años de historia de precios, datos fundamentales de empresas y cadenas de opciones.
+2. **FRED (`pandas-datareader`):** Utilizado para la extracción de métricas macroeconómicas directamente de los servidores de la Reserva Federal de San Luis.
 
-El proyecto se compone estrictamente de los siguientes archivos:
+## 🛠️ Instalación y Despliegue Local
 
-1. **`app.py`**: Es el motor principal de la aplicación. Contiene toda la lógica programada en Python utilizando la librería Streamlit para la interfaz visual y `yfinance` para la extracción de datos en tiempo real.
-2. **`requirements.txt`**: El listado de dependencias. Le indica al servidor qué librerías matemáticas y visuales debe instalar para que el código de `app.py` funcione correctamente.
-3. **`README.md`**: Este archivo de documentación.
+Para ejecutar Master Command en tu propia máquina, sigue estos pasos:
 
----
-
-## ⚙️ Instrucciones de Despliegue en Render
-
-Este proyecto está diseñado para ser alojado en la plataforma Render. Sigue estos pasos para ponerlo en producción:
-
-### Paso 1: Preparar el Repositorio
-1. Crea una cuenta en [GitHub](https://github.com/) si no tienes una.
-2. Crea un nuevo repositorio (puede ser privado).
-3. Sube los archivos `app.py`, `requirements.txt` y este `README.md` a la rama principal (`main` o `master`).
-
-### Paso 2: Configurar Render
-1. Inicia sesión en [Render](https://render.com/).
-2. Haz clic en el botón **"New"** y selecciona **"Web Service"**.
-3. Conecta tu cuenta de GitHub y selecciona el repositorio que acabas de crear.
-4. Completa la configuración con los siguientes parámetros exactos:
-   * **Name:** `market-tracker-pro` (o el nombre que prefieras).
-   * **Region:** Selecciona la región más cercana a ti (ej. Frankfurt).
-   * **Branch:** `main` (o la rama donde subiste los archivos).
-   * **Runtime:** `Python 3`
-   * **Build Command:** `pip install -r requirements.txt`
-   * **Start Command:** `streamlit run app.py --server.port $PORT --server.address 0.0.0.0`
-5. Selecciona tu plan (Free o Básico) y haz clic en **"Create Web Service"**.
-
-### Paso 3: Monitoreo
-Render comenzará a compilar la aplicación. Este proceso puede tardar un par de minutos la primera vez. Una vez finalizado, verás un enlace verde (ej. `https://market-tracker-pro.onrender.com`). Haz clic en él para ver tu tablero operativo en cualquier dispositivo.
-
----
-
-## 🛠️ Tecnologías Utilizadas
-
-* **Python 3:** Lenguaje de programación principal.
-* **Streamlit:** Framework para la creación de la interfaz web interactiva.
-* **YFinance:** API para la descarga de datos históricos y en tiempo real de Yahoo Finance.
-* **Pandas:** Librería para la manipulación, limpieza y estructuración de los datos financieros.
+1. **Clona el repositorio:**
+   ```bash
+   git clone [https://github.com/tu-usuario/nombre-del-repo.git](https://github.com/tu-usuario/nombre-del-repo.git)
+   cd nombre-del-repo
