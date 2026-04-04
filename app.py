@@ -19,21 +19,21 @@ st.markdown("""
 ACTIVOS = {
     "MAJOR INDICES": {
         "S&P 500": "^GSPC",
-        "MSCI World": "URTH", # ETF US
+        "MSCI World": "URTH", 
         "NASDAQ 100": "^NDX",
         "Euro Stoxx 50": "^STOXX50E",
-        "MSCI Emerging Markets": "EEM", # ETF US
+        "MSCI Emerging Markets": "EEM", 
         "Russell 2000": "^RUT",
-        "S&P 500 Equal Weight": "RSP" # ETF US
+        "S&P 500 Equal Weight": "RSP" 
     },
     "TITANES GLOBALES (15)": {
         "Apple": "AAPL", "Microsoft": "MSFT", "Alphabet": "GOOGL",
         "Amazon": "AMZN", "NVIDIA": "NVDA", "Meta Platforms": "META",
         "Tesla": "TSLA", "Berkshire Hathaway": "BRK-B", "Eli Lilly": "LLY",
         "JPMorgan Chase": "JPM", "Visa": "V", "Broadcom": "AVGO",
-        "Novo Nordisk": "NVO", # US ADR para fundamentales completos
-        "LVMH": "LVMUY", # US OTC para fundamentales
-        "ASML": "ASML" # US ADR
+        "Novo Nordisk": "NVO", 
+        "LVMH": "LVMUY", 
+        "ASML": "ASML" 
     },
     "CURRENCIES": {
         "USD / EUR": "USDEUR=X",
@@ -88,7 +88,6 @@ def obtener_precios():
     try:
         data = yf.download(all_tickers, period="10y", interval="1d", auto_adjust=False)
         
-        # Extracción de precios y volumen
         if isinstance(data.columns, pd.MultiIndex):
             df_precios = data['Adj Close'] if 'Adj Close' in data.columns.levels[0] else data['Close']
             df_volumen = data['Volume']
@@ -111,9 +110,8 @@ def obtener_precios():
     except Exception as e:
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=3600) # Fundamentales cacheados por 1 hora
+@st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
-    # Solo buscamos fundamentales si no es un índice puro o divisa
     if ticker.startswith("^") or "=" in ticker or ticker == "MERVAL_USD" or "-" in ticker and ticker != "BTC-USD":
         return {}
     try:
@@ -136,7 +134,6 @@ def obtener_opciones_titanes(tickers_titanes):
             tk = yf.Ticker(ticker)
             expirations = tk.options
             if expirations:
-                # Tomamos el vencimiento más cercano
                 opt = tk.option_chain(expirations[0])
                 puts_oi = opt.puts['openInterest'].sum()
                 calls_oi = opt.calls['openInterest'].sum()
@@ -187,18 +184,16 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, es_hoy)
     except:
         high_52w, low_52w = "-", "-"
 
-    # Volumen Relativo (Solo si es hoy)
     vol_pct_str = "-"
     if es_hoy and not df_volumen.empty and ticker in df_volumen.columns:
         serie_vol = df_volumen[ticker].loc[:fecha_pandas].dropna()
-        if len(serie_vol) >= 63: # ~3 meses
+        if len(serie_vol) >= 63: 
             vol_hoy = serie_vol.iloc[-1]
             vol_promedio_3m = serie_vol.iloc[-63:].mean()
             if vol_promedio_3m > 0:
                 vol_pct = ((vol_hoy / vol_promedio_3m) - 1) * 100
                 vol_pct_str = format_pct(vol_pct)
 
-    # Fundamentales (Solo si es hoy)
     fund = obtener_fundamentales(ticker) if es_hoy else {}
 
     return {
@@ -225,7 +220,7 @@ col_title, col_cal = st.columns([2, 1])
 with col_title:
     st.title("🛡️ Master Command by PS")
 with col_cal:
-    st.write("") # Espaciador
+    st.write("") 
     fecha_seleccionada = st.date_input(
         "🗓️ Fecha de Cálculo", 
         value=date.today(), 
@@ -267,13 +262,13 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
             
             if lista_resultados:
                 df_display = pd.DataFrame(lista_resultados)
+                # Corrección crítica aquí: se reemplazó applymap por map
                 st.dataframe(
-                    df_display.style.applymap(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
+                    df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
                     hide_index=True,
                     use_container_width=True
                 )
 
-        # MÓDULO DE POSICIÓN ABIERTA (Solo se muestra si la fecha es hoy)
         if es_hoy:
             st.markdown("---")
             st.subheader("🔥 Sentimiento Institucional Opciones (Titanes Globales)")
