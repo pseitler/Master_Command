@@ -109,7 +109,7 @@ ACTIVOS = {
     },
     "COMMODITIES": {
         "Oil Brent (BZ=F)": "BZ=F", "Gold (GC=F)": "GC=F", "Silver (SI=F)": "SI=F",
-        "Gold / Silver Ratio (GSR)": "GSR", # Nuevo activo sintético
+        "Gold / Silver Ratio (GSR)": "GSR",
         "Copper (HG=F)": "HG=F", "Soybeans (ZS=F)": "ZS=F", "Bitcoin (BTC-USD)": "BTC-USD"
     },
     "GLOBAL FACTORS (US ETFs)": {
@@ -135,21 +135,11 @@ TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
 # --- BLOQUE 2: LÓGICA DE TRADINGVIEW CORREGIDA ---
 def get_tv_url(ticker):
-    # Diccionario de equivalencias exactas entre Yahoo Finance y TradingView
+    # Traducción manual para evitar errores de limpieza de texto
     tv_mapping = {
-        "^GSPC": "SPX",
-        "^NDX": "NDX",
-        "^DJI": "DJI",
-        "^FTSE": "UKX",
-        "^IBEX": "IBC",
-        "^GDAXI": "DAX",
-        "^STOXX50E": "STOXX50",
-        "^VIX": "VIX",
-        "^IRX": "US03MY",  # Tasa 3 meses en TV
-        "^FVX": "US05Y",   # Tasa 5 años en TV
-        "^TNX": "US10Y",   # Tasa 10 años en TV
-        "^TYX": "US30Y",   # Tasa 30 años en TV
-        "GSR": "XAUXAG"    # Gold/Silver Ratio en TV
+        "^GSPC": "SPX", "^NDX": "NDX", "^DJI": "DJI", "^FTSE": "UKX", "^IBEX": "IBC",
+        "^GDAXI": "DAX", "^STOXX50E": "STOXX50", "^VIX": "VIX", 
+        "^IRX": "US03MY", "^FVX": "US05Y", "^TNX": "US10Y", "^TYX": "US30Y", "GSR": "XAUXAG"
     }
     
     if ticker in tv_mapping:
@@ -157,31 +147,23 @@ def get_tv_url(ticker):
     elif "MERVAL" in ticker:
         symbol = "MERV"
     else:
-        # Limpiamos el sufijo de las divisas sin borrar letras estructurales
-        symbol = ticker.replace('=X', '')
-        symbol = symbol.replace('=F', '')
-        # Limpiamos guiones (ej. BTC-USD -> BTCUSD)
-        symbol = symbol.replace('-', '')
-        # Limpiamos el acento circunflejo si quedó alguno
-        symbol = symbol.replace('^', '')
+        # Limpieza selectiva para no romper tickers con X o F
+        symbol = ticker.replace('=X', '').replace('=F', '').replace('-', '').replace('^', '')
         
     return f"https://www.tradingview.com/chart/?symbol={symbol}"
 
-# --- BLOQUE 3: MOTOR DE DATOS (YAHOO Y NATIVO FRED) ---
+# --- BLOQUE 3: MOTOR DE DATOS ---
 @st.cache_data(ttl=300) 
 def obtener_precios():
     all_tickers = []
     for cat in ACTIVOS.values(): all_tickers.extend(list(cat.values()))
-    
-    # Excluimos los activos sintéticos para que Yahoo no devuelva error
-    if "MERVAL_USD" in all_tickers: all_tickers.remove("MERVAL_USD")
-    if "GSR" in all_tickers: all_tickers.remove("GSR")
-        
-    all_tickers.extend(TICKERS_AUXILIARES)
-    all_tickers = list(set(all_tickers)) 
+    # Excluimos sintéticos de la descarga directa
+    tickers_descarga = [t for t in all_tickers if t not in ["MERVAL_USD", "GSR"]]
+    tickers_descarga.extend(TICKERS_AUXILIARES)
+    tickers_descarga = list(set(tickers_descarga)) 
     
     try:
-        data = yf.download(all_tickers, period="10y", interval="1d", auto_adjust=False)
+        data = yf.download(tickers_descarga, period="10y", interval="1d", auto_adjust=False)
         if isinstance(data.columns, pd.MultiIndex):
             df_precios = data['Adj Close'] if 'Adj Close' in data.columns.levels[0] else data['Close']
             df_volumen = data['Volume']
@@ -192,13 +174,13 @@ def obtener_precios():
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
-        # Cálculo del CCL Merval
+        # CCL Argentina
         merv, ggal_ba, ggal_us = df_precios['^MERV'].ffill(), df_precios['GGAL.BA'].ffill(), df_precios['GGAL'].ffill()    
         df_precios['MERVAL_USD'] = merv / (ggal_ba / (ggal_us * 10))
         
-        # Cálculo sintético del Gold/Silver Ratio (GSR)
+        # GSR (Gold/Silver Ratio) Sintético
         if 'GC=F' in df_precios.columns and 'SI=F' in df_precios.columns:
-            df_precios['GSR'] = df_precios['GC=F'] / df_precios['SI=F']
+            df_precios['GSR'] = df_precios['GC=F'].ffill() / df_precios['SI=F'].ffill()
             
         return df_precios, df_volumen
     except: return pd.DataFrame(), pd.DataFrame()
@@ -213,38 +195,26 @@ def obtener_macro_fred():
             df[series_id] = pd.to_numeric(df[series_id], errors='coerce')
             return df.dropna()
 
-        fed_df = fetch_fred('FEDFUNDS')
-        cpi_df = fetch_fred('CPIAUCSL')
-        unrate_df = fetch_fred('UNRATE')
-        walcl_df = fetch_fred('WALCL')
-
-        fed_funds = fed_df['FEDFUNDS'].iloc[-1]
-        unrate = unrate_df['UNRATE'].iloc[-1]
-
+        fed_df, cpi_df, unrate_df, walcl_df = fetch_fred('FEDFUNDS'), fetch_fred('CPIAUCSL'), fetch_fred('UNRATE'), fetch_fred('WALCL')
+        
         cpi_latest = cpi_df['CPIAUCSL'].iloc[-1]
-        one_year_ago = cpi_df.index[-1] - pd.DateOffset(years=1)
-        idx = cpi_df.index.get_indexer([one_year_ago], method='nearest')[0]
-        cpi_yoy = ((cpi_latest / cpi_df['CPIAUCSL'].iloc[idx]) - 1) * 100
+        cpi_idx = cpi_df.index.get_indexer([cpi_df.index[-1] - pd.DateOffset(years=1)], method='nearest')[0]
+        cpi_yoy = ((cpi_latest / cpi_df['CPIAUCSL'].iloc[cpi_idx]) - 1) * 100
 
         walcl_latest = walcl_df['WALCL'].iloc[-1]
-        one_month_ago = walcl_df.index[-1] - pd.DateOffset(months=1)
-        idx_m = walcl_df.index.get_indexer([one_month_ago], method='nearest')[0]
-        walcl_mom = ((walcl_latest / walcl_df['WALCL'].iloc[idx_m]) - 1) * 100
-
-        trend_balance = "🟢 Inyectando Liquidez" if walcl_mom > 0 else "🔴 Retirando Liquidez"
+        walcl_idx = walcl_df.index.get_indexer([walcl_df.index[-1] - pd.DateOffset(months=1)], method='nearest')[0]
+        walcl_mom = ((walcl_latest / walcl_df['WALCL'].iloc[walcl_idx]) - 1) * 100
 
         return {
-            "FED Funds Rate": f"{fed_funds:.2f}%",
+            "FED Funds Rate": f"{fed_df['FEDFUNDS'].iloc[-1]:.2f}%",
             "US CPI (Inflación YoY)": f"{cpi_yoy:.2f}%",
-            "US Unemployment Rate": f"{unrate:.1f}%",
-            "FED Balance Sheet (MoM)": f"{walcl_mom:.2f}% ({trend_balance})"
+            "US Unemployment Rate": f"{unrate_df['UNRATE'].iloc[-1]:.1f}%",
+            "FED Balance Sheet (MoM)": f"{walcl_mom:.2f}% ({"🟢 Inyectando" if walcl_mom > 0 else "🔴 Retirando"})"
         }
-    except Exception as e: 
-        return None
+    except: return None
 
 @st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
-    # Excluimos explícitamente el GSR para no buscar fundamentales de un ratio
     if ticker.startswith("^") or "=" in ticker or ticker in ["MERVAL_USD", "GSR"] or ("-" in ticker and ticker != "BTC-USD"): return {}
     try:
         info = yf.Ticker(ticker).info
@@ -272,7 +242,7 @@ def obtener_opciones_titanes(tickers_titanes):
         except: continue
     return pd.DataFrame(resultados)
 
-# --- BLOQUE 4: CÁLCULO DE MÉTRICAS QUANTITATIVAS ---
+# --- BLOQUE 4: CÁLCULO DE MÉTRICAS ---
 def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u):
     fecha_p = pd.to_datetime(fecha_ref).normalize()
     serie_p = df_precios[ticker].loc[:fecha_p].dropna()
@@ -281,7 +251,6 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     es_a = fecha_p >= pd.to_datetime(fecha_u).normalize()
     
     def format_pct(val): return f"{val:.2f}%" if pd.notnull(val) and isinstance(val, (int, float)) else "-"
-    
     def pct_c(days):
         try: return ((precio_a - serie_p.iloc[-days]) / serie_p.iloc[-days]) * 100
         except: return "-"
@@ -304,64 +273,48 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
             delta = serie_p.diff()
             rs = delta.clip(lower=0).ewm(com=13, adjust=False).mean() / (-1 * delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
             rsi_val = f"{100 - (100 / (1 + rs)).iloc[-1]:.1f}"
-    except: pass
-
-    try:
         if len(serie_p) >= 200: sma200_dist = format_pct(((precio_a - serie_p.rolling(window=200).mean().iloc[-1]) / serie_p.rolling(window=200).mean().iloc[-1]) * 100)
-    except: pass
-
-    try:
         if len(serie_p.iloc[-252:]) > 0: mdd_val = format_pct(((serie_p.iloc[-252:] - serie_p.iloc[-252:].cummax()) / serie_p.iloc[-252:].cummax()).min() * 100)
     except: pass
 
     fund = obtener_fundamentales(ticker) if es_a else {}
-    nombre_link = f'<a href="{get_tv_url(ticker)}" target="_blank" class="tv-link">{nombre}</a>'
-
     return {
-        "Nombre": nombre_link, "Precio / Ratio": f"{precio_a:,.2f}", 
-        "1D": format_pct(pct_c(1)), "1W": format_pct(pct_c(5)), "1M": format_pct(pct_c(21)), 
-        "YTD": format_pct(ytd), "1Y": format_pct(pct_c(252)), "3Y": format_pct(pct_c(756)),
-        "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val,
-        "Low 52W": l52, "High 52W": h52,
+        "Nombre": f'<a href="{get_tv_url(ticker)}" target="_blank" class="tv-link">{nombre}</a>', 
+        "Precio / Ratio": f"{precio_a:,.2f}", "1D": format_pct(pct_c(1)), "1W": format_pct(pct_c(5)), 
+        "1M": format_pct(pct_c(21)), "YTD": format_pct(ytd), "1Y": format_pct(pct_c(252)), "3Y": format_pct(pct_c(756)),
+        "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val, "Low 52W": l52, "High 52W": h52,
         "P/E": f"{fund.get('PE'):.2f}" if isinstance(fund.get('PE'), (int,float)) else "-",
         "Beta": f"{fund.get('Beta'):.2f}" if isinstance(fund.get('Beta'), (int,float)) else "-",
         "Target": f"{fund.get('Target'):.2f}" if isinstance(fund.get('Target'), (int,float)) else "-",
-        "Vol vs 3M": vol_pct, "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-",
-        "Rec.": fund.get("Rec", "-")
+        "Vol vs 3M": vol_pct, "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-", "Rec.": fund.get("Rec", "-")
     }
 
-# --- BLOQUE 5: INTERFAZ Y RENDERIZADO ---
-col_cal, col_title = st.columns([1, 2])
-with col_cal: fecha_sel = st.date_input("🗓️ Fecha de Cálculo", value=date.today(), max_value=date.today())
-with col_title: st.title("🛡️ Master Command by PS")
+# --- BLOQUE 5: INTERFAZ ---
+c_cal, c_tit = st.columns([1, 2])
+with c_cal: fecha_sel = st.date_input("🗓️ Fecha de Cálculo", value=date.today(), max_value=date.today())
+with c_tit: st.title("🛡️ Master Command by PS")
 
-def color_heatmap(val):
+def color_h(val):
     if isinstance(val, str) and "%" in val:
         try:
-            num = float(val.replace("%", ""))
-            if num > 3: c = '#1E7B1E' 
-            elif num > 1: c = '#228B22' 
-            elif num > 0: c = '#3CB371' 
-            elif num < -3: c = '#8B0000' 
-            elif num < -1: c = '#B22222' 
-            elif num < 0: c = '#CD5C5C' 
+            n = float(val.replace("%", ""))
+            if n > 3: c = '#1E7B1E'
+            elif n > 0: c = '#3CB371'
+            elif n < -3: c = '#8B0000'
+            elif n < 0: c = '#CD5C5C'
             else: c = 'transparent'
             return f'background-color: {c}; color: white; border-radius: 4px;'
         except: return ''
     return ''
 
-with st.spinner('Procesando algoritmos y radar macroeconómico...'):
+with st.spinner('Actualizando algoritmos institucional...'):
     df_p, df_v = obtener_precios()
-    macro_data = obtener_macro_fred()
+    macro = obtener_macro_fred()
 
-    if macro_data:
-        st.subheader("🦅 Radar Macroeconómico y Liquidez (FRED)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Tasa FED (Fed Funds)", macro_data["FED Funds Rate"])
-        c2.metric("Inflación CPI (YoY)", macro_data["US CPI (Inflación YoY)"])
-        c3.metric("Desempleo (EE.UU.)", macro_data["US Unemployment Rate"])
-        c4.metric("Balance FED (Var. Mensual)", macro_data["FED Balance Sheet (MoM)"])
-        st.markdown("<br>", unsafe_allow_html=True)
+    if macro:
+        st.subheader("🦅 Radar Macro y Liquidez (FRED)")
+        cols = st.columns(4)
+        for i, (k, v) in enumerate(macro.items()): cols[i].metric(k, v)
 
     if not df_p.empty:
         f_u = df_p.index[-1].date()
@@ -371,33 +324,34 @@ with st.spinner('Procesando algoritmos y radar macroeconómico...'):
             for n, t in items.items():
                 try: res.append(calcular_metricas(df_p, df_v, t, n, fecha_sel, f_u))
                 except: continue
-            
             if res:
-                df_res = pd.DataFrame(res)
-                html_table = df_res.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y', 'SMA 200 Dist.', 'MDD 1Y']).hide(axis="index").to_html(escape=False)
-                st.markdown(f'<div class="table-container">{html_table}</div>', unsafe_allow_html=True)
+                df_r = pd.DataFrame(res)
+                st.markdown(f'<div class="table-container">{df_r.style.map(color_h, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y', 'SMA 200 Dist.', 'MDD 1Y']).hide(axis="index").to_html(escape=False)}</div>', unsafe_allow_html=True)
 
         if fecha_sel >= f_u:
             st.markdown("---")
-            col_opt, col_corr = st.columns([1, 1])
-            with col_opt:
+            c_opt, c_corr = st.columns([1, 1])
+            with c_opt:
                 st.subheader("🕸️ Matriz de Correlación (1 Año)")
                 try:
-                    titanes_tickers = list(ACTIVOS["TITANES GLOBALES (15)"].values())
-                    corr_matrix = df_p[titanes_tickers].iloc[-252:].pct_change().corr()
-                    nombres_cortos = {v: k.split(" ")[0] for k, v in ACTIVOS["TITANES GLOBALES (15)"].items()}
-                    corr_matrix = corr_matrix.rename(columns=nombres_cortos, index=nombres_cortos)
-                    html_corr = corr_matrix.style.background_gradient(cmap='coolwarm', axis=None, vmin=-1, vmax=1).format("{:.2f}").to_html()
-                    st.markdown(f'<div class="table-container">{html_corr}</div>', unsafe_allow_html=True)
-                except: st.info("Datos insuficientes para la matriz.")
-
-            with col_corr:
-                st.subheader("🔥 Sentimiento (Opciones)")
-                df_opt = obtener_opciones_titanes(list(ACTIVOS["TITANES GLOBALES (15)"].values()))
-                if not df_opt.empty:
-                    df_opt['Titan'] = df_opt['Titan'].map(lambda x: nombres_cortos.get(x, x))
-                    st.markdown(f'<div class="table-container">{df_opt.to_html(index=False)}</div>', unsafe_allow_html=True)
-                else: st.info("Cadena de opciones no disponible.")
+                    titanes = list(ACTIVOS["TITANES GLOBALES (15)"].values())
+                    # FILTRADO BLINDADO: Solo tickers que existan en la descarga
+                    existentes = [t for t in titanes if t in df_p.columns]
+                    if len(existentes) > 1:
+                        corr = df_p[existentes].iloc[-252:].pct_change().corr()
+                        mapa = {v: k.split(" ")[0] for k, v in ACTIVOS["TITANES GLOBALES (15)"].items()}
+                        corr = corr.rename(columns=mapa, index=mapa)
+                        st.markdown(f'<div class="table-container">{corr.style.background_gradient(cmap='coolwarm', axis=None, vmin=-1, vmax=1).format("{:.2f}").to_html()}</div>', unsafe_allow_html=True)
+                    else: st.info("Datos insuficientes para la matriz.")
+                except: st.info("Error al procesar la matriz.")
+            with c_corr:
+                st.subheader("🔥 Sentimiento Opciones")
+                df_o = obtener_opciones_titanes(list(ACTIVOS["TITANES GLOBALES (15)"].values()))
+                if not df_o.empty:
+                    n_map = {v: k.split(" ")[0] for k, v in ACTIVOS["TITANES GLOBALES (15)"].items()}
+                    df_o['Titan'] = df_o['Titan'].map(n_map)
+                    st.markdown(f'<div class="table-container">{df_o.to_html(index=False)}</div>', unsafe_allow_html=True)
+                else: st.info("Datos de opciones no disponibles.")
 
 # --- BLOQUE 6: EQUIVALENCIAS Y GLOSARIO ---
 st.markdown("---")
@@ -410,34 +364,16 @@ st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>
 
 st.markdown("""
 <div style="background-color: #1E1E24; padding: 20px; border-radius: 8px; border-left: 5px solid #2962FF; margin-top: 20px;">
-    <h4>📚 Manual de Interpretación Quant & Macro</h4>
-    <p>Has incorporado métricas de grado institucional. Aquí tienes la guía rápida para operar con ellas:</p>
+    <h4>📚 Manual de Interpretación Quant, Macro & GSR</h4>
     <ul>
-        <li><b>Radar Macro (FRED):</b> El "Motor" del mercado. 
+        <li><b>Gold/Silver Ratio (GSR):</b> Indica cuántas onzas de plata se necesitan para comprar una de oro. 
             <ul>
-                <li><i>Balance FED (Liquidez):</i> Si es verde (+), la FED inyecta dinero (combustible para las acciones y Bitcoin). Si es rojo (-), retiran liquidez, aumentando el riesgo de corrección.</li>
-                <li><i>Tasa Desempleo:</i> Si sube rápidamente, el mercado anticipa recesión.</li>
+                <li><i>GSR > 80:</i> Históricamente indica pánico o recesión. El oro está "caro" frente a la plata.</li>
+                <li><i>GSR < 50:</i> Indica euforia económica o alta inflación industrial. La plata está fuerte.</li>
             </ul>
         </li>
-        <li><b>RSI (14) - Índice de Fuerza Relativa:</b> Mide la velocidad de los cambios de precio de 0 a 100. 
-            <ul>
-                <li><i>Sobrecomprado (>70):</i> El activo ha subido demasiado rápido; alto riesgo de corrección.</li>
-                <li><i>Sobrevendido (<30):</i> El activo ha caído con fuerza; posible oportunidad de rebote.</li>
-            </ul>
-        </li>
-        <li><b>SMA 200 Dist. (Distancia a la Media Móvil):</b> Porcentaje de desviación respecto a los últimos 200 días.
-            <ul>
-                <li><i>Positivo Alto (>15-20%):</i> Tendencia alcista muy fuerte, pero la "goma elástica" está tensa. Precaución con compras nuevas.</li>
-            </ul>
-        </li>
-        <li><b>MDD 1Y (Máximo Drawdown):</b> La peor caída desde el pico más alto en los últimos 12 meses. Mide el "dolor" histórico. Si el MDD es -35%, quien compró en la cima perdió un 35% antes de recuperarse.</li>
-        <li><b>Matriz de Correlación (coolwarm heatmap):</b> Evalúa la diversificación real (-1 a 1).
-            <ul>
-                <li><i>Rojo Intenso (+0.8 a 1.0):</i> Se mueven casi igual. Poseer ambos no reduce tu riesgo.</li>
-                <li><i>Azul Intenso (Negativo):</i> Se mueven de forma inversa. Sirven de cobertura (hedge).</li>
-            </ul>
-        </li>
-        <li><b>Gold/Silver Ratio (GSR):</b> Cuántas onzas de plata se necesitan para comprar una de oro. Picos altos (>80) suelen indicar recesión o pánico estructural, mientras que valles (<50) sugieren expansión económica e inflación.</li>
+        <li><b>RSI (14):</b> Sobrecomprado (>70) = Riesgo de caída. Sobrevendido (<30) = Oportunidad de rebote.</li>
+        <li><b>Matriz de Correlación:</b> Rojo (+1) = Se mueven igual. Azul (-1) = Cobertura perfecta.</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
