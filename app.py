@@ -9,24 +9,19 @@ import re
 # ==========================================
 st.set_page_config(layout="wide", page_title="Master Command by PS")
 
-# Aquí definimos el diseño profesional de la terminal.
-# Se configuran dos contenedores: uno normal (.table-container) que crece hacia abajo,
-# y uno con scroll vertical (.titanes-scroll) diseñado para mostrar exactamente 10 líneas.
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
     
-    /* Contenedor estándar para índices y ETFs */
+    /* Contenedores */
     .table-container {
         width: 100%;
         overflow-x: auto;
         margin-bottom: 2rem;
     }
-    
-    /* Contenedor exclusivo para los Titanes (10 líneas visibles + scroll) */
     .titanes-scroll {
         width: 100%;
-        max-height: 460px; /* Altura calculada para ~10 filas */
+        max-height: 460px;
         overflow-y: auto;
         overflow-x: auto;
         margin-bottom: 2rem;
@@ -42,10 +37,28 @@ st.markdown("""
         font-size: 14px;
     }
 
-    /* Congelar la Fila de Títulos (Arriba) */
-    .table-container th, .titanes-scroll th {
+    /* NUEVO: Encabezados de Agrupación (Fila 1) */
+    .group-header {
+        background-color: #161a21 !important;
+        color: #888888 !important;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        border-bottom: 1px solid #444444 !important;
+        text-align: center !important;
+    }
+
+    /* Congelar la Fila de Agrupación (Arriba - Nivel 1) */
+    thead tr:nth-child(1) th {
         position: sticky;
         top: 0;
+        z-index: 10;
+    }
+
+    /* Congelar la Fila de Títulos (Arriba - Nivel 2) */
+    thead tr:nth-child(2) th {
+        position: sticky;
+        top: 36px; /* Altura aproximada de la primera fila */
         background-color: #1E1E24 !important;
         color: #FFFFFF;
         z-index: 10;
@@ -64,7 +77,7 @@ st.markdown("""
     }
 
     /* Congelar la Primera Columna de Nombres (Izquierda) */
-    .table-container td:first-child, .titanes-scroll td:first-child {
+    tbody td:first-child, thead tr:nth-child(2) th:first-child {
         position: sticky;
         left: 0;
         z-index: 11;
@@ -74,9 +87,7 @@ st.markdown("""
     }
 
     /* Intersección Esquina Superior Izquierda (Debe estar por encima de todo) */
-    .table-container th:first-child, .titanes-scroll th:first-child {
-        position: sticky;
-        left: 0;
+    thead tr:nth-child(1) th:first-child, thead tr:nth-child(2) th:first-child {
         z-index: 12;
         background-color: #1E1E24 !important;
     }
@@ -96,8 +107,6 @@ st.markdown("""
 # ==========================================
 # BLOQUE 1: DICCIONARIO MAESTRO COMPLETO
 # ==========================================
-# Aquí están todos tus activos organizados en categorías. El código leerá este diccionario
-# para saber qué descargar y en qué orden pintarlo en la pantalla.
 ACTIVOS = {
     "MAJOR INDICES": {
         "S&P 500 (^GSPC)": "^GSPC", "MSCI World (URTH)": "URTH", "NASDAQ 100 (^NDX)": "^NDX",
@@ -165,8 +174,6 @@ def get_tv_url(ticker):
 # ==========================================
 # BLOQUE 3: MOTORES DE DESCARGA DE DATOS
 # ==========================================
-# ttl=300 significa que el servidor guarda los datos 5 minutos. Si refrescas la página
-# a los 6 minutos, volverá a descargar el precio de "HOY" automáticamente.
 @st.cache_data(ttl=300) 
 def obtener_precios():
     all_tickers = []
@@ -250,7 +257,8 @@ def obtener_opciones_titanes(tickers_titanes):
             tk = yf.Ticker(t)
             if tk.options:
                 opt = tk.option_chain(tk.options[0])
-                p_oi, c_oi = opt.puts['openInterest'].sum() if 'openInterest' in opt.puts else 0, opt.calls['openInterest'].sum() if 'openInterest' in opt.calls else 0
+                p_oi = opt.puts['openInterest'].sum() if 'openInterest' in opt.puts else 0
+                c_oi = opt.calls['openInterest'].sum() if 'openInterest' in opt.calls else 0
                 if pd.isna(p_oi): p_oi = 0
                 if pd.isna(c_oi): c_oi = 0
                 resultados.append({
@@ -294,33 +302,51 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     fund = obtener_fundamentales(ticker) if es_a else {}
     return {
         "Nombre": f'<a href="{get_tv_url(ticker)}" target="_blank" class="tv-link">{nombre}</a>', "Precio / Ratio": f"{precio_a:,.2f}", 
+        "Low 52W": l52, "High 52W": h52,
         "1D": format_pct(pct_c(1)), "1W": format_pct(pct_c(5)), "1M": format_pct(pct_c(21)), 
         "YTD": format_pct(ytd), "1Y": format_pct(pct_c(252)), "3Y": format_pct(pct_c(756)),
-        "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val, "Low 52W": l52, "High 52W": h52,
+        "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val,
         "P/E": f"{fund.get('PE'):.2f}" if isinstance(fund.get('PE'), (int,float)) else "-",
         "Beta": f"{fund.get('Beta'):.2f}" if isinstance(fund.get('Beta'), (int,float)) else "-",
         "Target": f"{fund.get('Target'):.2f}" if isinstance(fund.get('Target'), (int,float)) else "-",
         "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-", "Rec.": fund.get("Rec", "-")
     }
 
-# ==========================================
-# BLOQUE 5: INTERFAZ VISUAL (UI)
-# ==========================================
-col_title, col_cal = st.columns([2, 1])
-
-df_p, df_v, hora_act = obtener_precios()
-
-with col_title: 
-    st.title("🛡️ Master Command")
-    if hora_act: st.caption(f"Última lectura del mercado: **{hora_act}** (Hora del Servidor)")
-        
-with col_cal: 
-    st.write("") 
-    fecha_sel = st.date_input("🗓️ Fecha de Cálculo Histórico", value=date.today(), max_value=date.today())
-    # Botón que fuerza la eliminación del caché y vuelve a descargar todo al instante
-    if st.button("🔄 Actualizar Datos Ahora"):
-        st.cache_data.clear()
-        st.rerun()
+# NUEVO: Generador de Tablas HTML con Encabezados Agrupados (Grid Profesional)
+def generar_tabla_html_agrupada(df, clase_css):
+    html = f'<div class="{clase_css}"><table>'
+    html += '''
+    <thead>
+        <tr>
+            <th class="group-header">IDENTIFICACIÓN</th>
+            <th colspan="3" class="group-header">PRECIOS & RANGO</th>
+            <th colspan="6" class="group-header">RENDIMIENTOS (%)</th>
+            <th colspan="3" class="group-header">ANÁLISIS QUANT</th>
+            <th colspan="5" class="group-header">FUNDAMENTALES</th>
+        </tr>
+        <tr>
+            <th>Nombre</th>
+            <th>Precio / Ratio</th><th>Low 52W</th><th>High 52W</th>
+            <th>1D</th><th>1W</th><th>1M</th><th>YTD</th><th>1Y</th><th>3Y</th>
+            <th>RSI (14)</th><th>SMA 200 Dist.</th><th>MDD 1Y</th>
+            <th>P/E</th><th>Beta</th><th>Target</th><th>BPA</th><th>Rec.</th>
+        </tr>
+    </thead>
+    <tbody>
+    '''
+    for _, row in df.iterrows():
+        html += "<tr>"
+        columnas_ordenadas = ["Nombre", "Precio / Ratio", "Low 52W", "High 52W", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Beta", "Target", "BPA", "Rec."]
+        for col in columnas_ordenadas:
+            val = row.get(col, "-")
+            if col in ["1D", "1W", "1M", "YTD", "1Y", "3Y", "SMA 200 Dist.", "MDD 1Y"]:
+                style = color_heatmap(str(val))
+                html += f'<td style="{style}">{val}</td>'
+            else:
+                html += f"<td>{val}</td>"
+        html += "</tr>"
+    html += "</tbody></table></div>"
+    return html
 
 def color_heatmap(val):
     if isinstance(val, str) and "%" in val:
@@ -337,9 +363,27 @@ def color_heatmap(val):
         except: return ''
     return ''
 
+# ==========================================
+# BLOQUE 5: INTERFAZ VISUAL (UI)
+# ==========================================
+col_title, col_cal = st.columns([2, 1])
+df_p, df_v, hora_act = obtener_precios()
+
+with col_title: 
+    st.title("🛡️ Master Command")
+    if hora_act: st.caption(f"Última lectura del mercado: **{hora_act}** (Hora del Servidor)")
+        
+with col_cal: 
+    st.write("") 
+    fecha_sel = st.date_input("🗓️ Fecha de Cálculo Histórico", value=date.today(), max_value=date.today())
+    if st.button("🔄 Actualizar Datos Ahora"):
+        st.cache_data.clear()
+        st.rerun()
+
 with st.spinner('Validando caché y procesando matemáticas en memoria...'):
     macro_data = obtener_macro_fred()
 
+    # RESPUESTA AL PUNTO 5: Visualización de FED blindada con alertas.
     if macro_data:
         st.subheader("🦅 Radar Macroeconómico y Liquidez (FRED)")
         c1, c2, c3, c4 = st.columns(4)
@@ -348,7 +392,38 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
         c3.metric("Desempleo (EE.UU.)", macro_data["US Unemployment Rate"])
         c4.metric("Balance FED (Var. Mensual)", macro_data["FED Balance Sheet (MoM)"])
         st.markdown("<br>", unsafe_allow_html=True)
+    else:
+        st.warning("⚠️ Los servidores de la FED (FRED) no respondieron a tiempo o están en mantenimiento. Los datos macroeconómicos están temporalmente ocultos.")
 
+    # RESPUESTA AL PUNTO 2: Buscador táctico
+    st.markdown("---")
+    st.subheader("🔍 Buscador Táctico de Tickers")
+    search_ticker = st.text_input("Introduce un Ticker que no esté en el tablero (ej. MSTR, META, PLTR):").upper().strip()
+    
+    if search_ticker:
+        with st.spinner(f"Descargando y analizando {search_ticker}..."):
+            try:
+                s_data = yf.download(search_ticker, period="10y", interval="1d", auto_adjust=False)
+                if not s_data.empty:
+                    df_s_p = s_data['Adj Close'] if 'Adj Close' in s_data.columns else s_data['Close']
+                    df_s_v = s_data['Volume'] if 'Volume' in s_data.columns else pd.DataFrame()
+                    
+                    df_s_p = pd.DataFrame({search_ticker: df_s_p})
+                    if isinstance(df_s_v, pd.Series): df_s_v = pd.DataFrame({search_ticker: df_s_v})
+                    
+                    df_s_p.index = pd.to_datetime(df_s_p.index).tz_localize(None).normalize()
+                    if not df_s_v.empty: df_s_v.index = pd.to_datetime(df_s_v.index).tz_localize(None).normalize()
+
+                    res_s = calcular_metricas(df_s_p, df_s_v, search_ticker, search_ticker, fecha_sel, date.today())
+                    if res_s:
+                        html_busqueda = generar_tabla_html_agrupada(pd.DataFrame([res_s]), "table-container")
+                        st.markdown(html_busqueda, unsafe_allow_html=True)
+                else:
+                    st.error("❌ No se encontraron datos. Verifica que el Ticker sea correcto según Yahoo Finance.")
+            except Exception as e:
+                st.error("❌ Ticker no válido o error de red.")
+
+    # TABLEROS PRINCIPALES
     if not df_p.empty:
         f_u = df_p.index[-1].date()
         for cat, items in ACTIVOS.items():
@@ -360,10 +435,10 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
             
             if res:
                 df_res = pd.DataFrame(res)
-                html_table = df_res.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y', 'SMA 200 Dist.', 'MDD 1Y']).hide(axis="index").to_html(escape=False)
-                # Aplicamos la clase CSS "titanes-scroll" SOLAMENTE si la categoría es Titanes
+                # RESPUESTA AL PUNTO 3: Tablas agrupadas implementadas
                 clase_css = "titanes-scroll" if "TITANES" in cat else "table-container"
-                st.markdown(f'<div class="{clase_css}">{html_table}</div>', unsafe_allow_html=True)
+                html_table = generar_tabla_html_agrupada(df_res, clase_css)
+                st.markdown(html_table, unsafe_allow_html=True)
 
         if fecha_sel >= f_u:
             st.markdown("---")
@@ -386,26 +461,21 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
                 if not df_opt.empty:
                     df_opt['Titan'] = df_opt['Titan'].map(lambda x: nombres_cortos.get(x, x))
                     st.markdown(f'<div class="table-container">{df_opt.to_html(index=False)}</div>', unsafe_allow_html=True)
-                else: st.info("La API de Yahoo no reporta contratos abiertos en este momento.")
+                else: st.info("La API de Yahoo no reporta contratos abiertos en este momento (Fines de semana o festivos).")
 
 # ==========================================
-# BLOQUE 6: EQUIVALENCIAS Y GLOSARIO (MARKDOWN NATIVO)
+# BLOQUE 6: EQUIVALENCIAS Y GLOSARIO
 # ==========================================
 st.markdown("---")
 st.subheader("🇪🇺 Diccionario Maestro de Equivalencias UCITS")
 
 ucits_data = [
-    # MAJOR INDICES
     {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "MSCI World (URTH)", "UCITS Recomendado": "IWDA.L / EUNL.DE"},
     {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "MSCI Emerging Markets (EEM)", "UCITS Recomendado": "EMIM.L / IS3N.DE"},
     {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "S&P 500 Equal Weight (RSP)", "UCITS Recomendado": "SPXW.L / XDEW.DE"},
-    
-    # BONDS
     {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "US Treasury 0-1Y (SHV)", "UCITS Recomendado": "VDST.L / IB01.L"},
     {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "US Treasury 20Y+ (TLT)", "UCITS Recomendado": "DTLA.L / IDTL.L"},
     {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "Intl Gov Bonds (BNDX)", "UCITS Recomendado": "VETY.DE / IGLA.L"},
-    
-    # GLOBAL FACTORS
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Large Cap Value (IVE)", "UCITS Recomendado": "CBUV.L / IUSV.DE"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Large Cap Growth (IVW)", "UCITS Recomendado": "IUSG.DE / IWYG.L"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Small Cap Value (IWN)", "UCITS Recomendado": "ZPRV.DE"},
@@ -413,8 +483,6 @@ ucits_data = [
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Value (VLUE)", "UCITS Recomendado": "IWVL.L"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Quality (QUAL)", "UCITS Recomendado": "IWQU.L"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Dividend (VYMI)", "UCITS Recomendado": "VHYL.L / VHYD.L"},
-    
-    # US SECTORS
     {"Categoría": "US SECTORS", "ETF (Ticker US)": "Technology (XLK)", "UCITS Recomendado": "IUIT.L / QDVE.DE"},
     {"Categoría": "US SECTORS", "ETF (Ticker US)": "Healthcare (XLV)", "UCITS Recomendado": "IUHC.L"},
     {"Categoría": "US SECTORS", "ETF (Ticker US)": "Financials (XLF)", "UCITS Recomendado": "IUFS.L"},
@@ -425,8 +493,6 @@ ucits_data = [
     {"Categoría": "US SECTORS", "ETF (Ticker US)": "Energy (XLE)", "UCITS Recomendado": "IUES.L"},
     {"Categoría": "US SECTORS", "ETF (Ticker US)": "Utilities (XLU)", "UCITS Recomendado": "IUUS.L"},
     {"Categoría": "US SECTORS", "ETF (Ticker US)": "Real Estate (XLRE)", "UCITS Recomendado": "IUSP.L"},
-    
-    # ASIA & LATAM
     {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "Japan (EWJ)", "UCITS Recomendado": "IJPN.L"},
     {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "South Korea (EWY)", "UCITS Recomendado": "CSKR.L"},
     {"Categoría": "ASIA & LATAM", "ETF (Ticker US)": "India (INDA)", "UCITS Recomendado": "NDIA.L / IIND.L"},
@@ -436,11 +502,8 @@ ucits_data = [
 ]
 
 ucits_df = pd.DataFrame(ucits_data)
-
-# Convertir a HTML y meter en el contenedor para que mantenga el estilo visual de la app
 st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>', unsafe_allow_html=True)
-# El manual ahora usa puras etiquetas Markdown nativas de Streamlit para evitar
-# que el código HTML se rompa o se visualice mal en la web.
+
 st.info("""
 ### 📚 Manual de Interpretación Analítica Avanzada
 Este tablero no solo monitoriza el mercado, sino que evalúa la salud estructural, el sentimiento oculto y los riesgos asimétricos de la cartera basándose en modelos cuantitativos.
@@ -451,8 +514,8 @@ Este tablero no solo monitoriza el mercado, sino que evalúa la salud estructura
 
 #### 2. Análisis Táctico e Indicadores Cuantitativos
 * **RSI (Índice de Fuerza Relativa a 14 Días):** Mide la sobreextensión direccional del precio.
-    * *> 70 (Sobrecompra):* Euforia de corto plazo. Vulnerable a correcciones técnicas inminentes.
-    * *< 30 (Sobreventa):* Pánico de corto plazo. Suele presentar zonas de entrada de alta probabilidad estadística (rebote técnico).
+* *> 70 (Sobrecompra):* Euforia de corto plazo. Vulnerable a correcciones técnicas inminentes.
+* *< 30 (Sobreventa):* Pánico de corto plazo. Suele presentar zonas de entrada de alta probabilidad estadística (rebote técnico).
 * **SMA 200 Dist. (Distancia a la Media Móvil 200):** La gravedad del mercado. Si un activo se desvía más de un +15% a +25% de su media móvil de 200 días, la "goma elástica" está al máximo de su capacidad. Comprar en estos niveles reduce drásticamente el ratio riesgo/beneficio.
 * **MDD 1Y (Máximo Drawdown):** La caída más profunda desde el máximo relativo de los últimos 12 meses. Es el verdadero medidor del "Riesgo de Ruina". Permite dimensionar la volatilidad estructural de un activo para ajustar el tamaño de la posición.
 
