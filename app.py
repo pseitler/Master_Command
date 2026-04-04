@@ -1,24 +1,39 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import re
 
-# --- CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS ---
+# ==========================================
+# BLOQUE 0: CONFIGURACIÓN Y ESTILOS VISUALES
+# ==========================================
 st.set_page_config(layout="wide", page_title="Master Command by PS")
 
+# Aquí definimos el diseño profesional de la terminal.
+# Se configuran dos contenedores: uno normal (.table-container) que crece hacia abajo,
+# y uno con scroll vertical (.titanes-scroll) diseñado para mostrar exactamente 10 líneas.
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
     
+    /* Contenedor estándar para índices y ETFs */
     .table-container {
         width: 100%;
         overflow-x: auto;
-        overflow-y: visible;
-        margin-bottom: 3rem;
+        margin-bottom: 2rem;
     }
     
-    .table-container table {
+    /* Contenedor exclusivo para los Titanes (10 líneas visibles + scroll) */
+    .titanes-scroll {
+        width: 100%;
+        max-height: 460px; /* Altura calculada para ~10 filas */
+        overflow-y: auto;
+        overflow-x: auto;
+        margin-bottom: 2rem;
+        border: 1px solid #333333;
+    }
+    
+    .table-container table, .titanes-scroll table {
         width: 100%;
         border-collapse: separate; 
         border-spacing: 0;
@@ -27,10 +42,11 @@ st.markdown("""
         font-size: 14px;
     }
 
-    .table-container th {
+    /* Congelar la Fila de Títulos (Arriba) */
+    .table-container th, .titanes-scroll th {
         position: sticky;
         top: 0;
-        background-color: #1E1E24;
+        background-color: #1E1E24 !important;
         color: #FFFFFF;
         z-index: 10;
         padding: 12px;
@@ -38,7 +54,8 @@ st.markdown("""
         white-space: nowrap;
     }
 
-    .table-container td {
+    /* Diseño de las celdas normales */
+    .table-container td, .titanes-scroll td {
         padding: 10px 14px;
         text-align: center;
         border-bottom: 1px solid #262730;
@@ -46,32 +63,26 @@ st.markdown("""
         background-color: #0E1117;
     }
 
-    .table-container td:first-child, .table-container th:first-child {
+    /* Congelar la Primera Columna de Nombres (Izquierda) */
+    .table-container td:first-child, .titanes-scroll td:first-child {
         position: sticky;
         left: 0;
         z-index: 11;
         text-align: left;
         border-right: 2px solid #333333;
-    }
-    
-    .table-container td:first-child {
-        background-color: #161a21;
+        background-color: #161a21 !important;
     }
 
-    .table-container th:first-child {
+    /* Intersección Esquina Superior Izquierda (Debe estar por encima de todo) */
+    .table-container th:first-child, .titanes-scroll th:first-child {
+        position: sticky;
+        left: 0;
         z-index: 12;
-        background-color: #1E1E24;
+        background-color: #1E1E24 !important;
     }
 
-    .tv-link {
-        color: #2962FF;
-        text-decoration: none;
-        font-weight: bold;
-    }
-    .tv-link:hover {
-        text-decoration: underline;
-        color: #448AFF;
-    }
+    .tv-link { color: #2962FF; text-decoration: none; font-weight: bold; }
+    .tv-link:hover { text-decoration: underline; color: #448AFF; }
     
     div[data-testid="metric-container"] {
         background-color: #161a21;
@@ -82,7 +93,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- BLOQUE 1: DICCIONARIO MAESTRO ---
+# ==========================================
+# BLOQUE 1: DICCIONARIO MAESTRO COMPLETO
+# ==========================================
+# Aquí están todos tus activos organizados en categorías. El código leerá este diccionario
+# para saber qué descargar y en qué orden pintarlo en la pantalla.
 ACTIVOS = {
     "MAJOR INDICES": {
         "S&P 500 (^GSPC)": "^GSPC", "MSCI World (URTH)": "URTH", "NASDAQ 100 (^NDX)": "^NDX",
@@ -132,7 +147,9 @@ ACTIVOS = {
 
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: LÓGICA DE TRADINGVIEW ---
+# ==========================================
+# BLOQUE 2: LINKS A TRADINGVIEW (MAPEO EXACTO)
+# ==========================================
 def get_tv_url(ticker):
     tv_mapping = {
         "^GSPC": "SPX", "^NDX": "NDX", "^DJI": "DJI", "^FTSE": "UKX",
@@ -140,19 +157,17 @@ def get_tv_url(ticker):
         "^VIX": "VIX", "^IRX": "US03MY", "^FVX": "US05Y", "^TNX": "US10Y",
         "^TYX": "US30Y", "GSR": "XAUXAG"
     }
-    
-    if ticker in tv_mapping:
-        symbol = tv_mapping[ticker]
-    elif "MERVAL" in ticker:
-        symbol = "MERV"
-    else:
-        symbol = ticker.replace('=X', '').replace('=F', '').replace('-', '').replace('^', '')
-        
+    if ticker in tv_mapping: symbol = tv_mapping[ticker]
+    elif "MERVAL" in ticker: symbol = "MERV"
+    else: symbol = ticker.replace('=X', '').replace('=F', '').replace('-', '').replace('^', '')
     return f"https://www.tradingview.com/chart/?symbol={symbol}"
 
-# --- BLOQUE 3: MOTOR DE DATOS CACHEADO ---
-# Memoria caché estricta de 24 horas (86400 segundos)
-@st.cache_data(ttl=86400) 
+# ==========================================
+# BLOQUE 3: MOTORES DE DESCARGA DE DATOS
+# ==========================================
+# ttl=300 significa que el servidor guarda los datos 5 minutos. Si refrescas la página
+# a los 6 minutos, volverá a descargar el precio de "HOY" automáticamente.
+@st.cache_data(ttl=300) 
 def obtener_precios():
     all_tickers = []
     for cat in ACTIVOS.values(): all_tickers.extend(list(cat.values()))
@@ -175,19 +190,18 @@ def obtener_precios():
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
+        # Merval CCL Argentina y Gold Silver Ratio
         merv, ggal_ba, ggal_us = df_precios['^MERV'].ffill(), df_precios['GGAL.BA'].ffill(), df_precios['GGAL'].ffill()    
         df_precios['MERVAL_USD'] = merv / (ggal_ba / (ggal_us * 10))
         
         if 'GC=F' in df_precios.columns and 'SI=F' in df_precios.columns:
             df_precios['GSR'] = df_precios['GC=F'] / df_precios['SI=F']
             
-        # Marca de tiempo de la última descarga exitosa
         hora_actualizacion = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
-            
         return df_precios, df_volumen, hora_actualizacion
     except: return pd.DataFrame(), pd.DataFrame(), None
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=300)
 def obtener_macro_fred():
     try:
         def fetch_fred(series_id):
@@ -206,27 +220,18 @@ def obtener_macro_fred():
         unrate = unrate_df['UNRATE'].iloc[-1]
 
         cpi_latest = cpi_df['CPIAUCSL'].iloc[-1]
-        one_year_ago = cpi_df.index[-1] - pd.DateOffset(years=1)
-        idx = cpi_df.index.get_indexer([one_year_ago], method='nearest')[0]
-        cpi_yoy = ((cpi_latest / cpi_df['CPIAUCSL'].iloc[idx]) - 1) * 100
+        cpi_yoy = ((cpi_latest / cpi_df['CPIAUCSL'].iloc[cpi_df.index.get_indexer([cpi_df.index[-1] - pd.DateOffset(years=1)], method='nearest')[0]]) - 1) * 100
 
         walcl_latest = walcl_df['WALCL'].iloc[-1]
-        one_month_ago = walcl_df.index[-1] - pd.DateOffset(months=1)
-        idx_m = walcl_df.index.get_indexer([one_month_ago], method='nearest')[0]
-        walcl_mom = ((walcl_latest / walcl_df['WALCL'].iloc[idx_m]) - 1) * 100
-
-        trend_balance = "🟢 Inyectando Liquidez" if walcl_mom > 0 else "🔴 Retirando Liquidez"
+        walcl_mom = ((walcl_latest / walcl_df['WALCL'].iloc[walcl_df.index.get_indexer([walcl_df.index[-1] - pd.DateOffset(months=1)], method='nearest')[0]]) - 1) * 100
 
         return {
-            "FED Funds Rate": f"{fed_funds:.2f}%",
-            "US CPI (Inflación YoY)": f"{cpi_yoy:.2f}%",
-            "US Unemployment Rate": f"{unrate:.1f}%",
-            "FED Balance Sheet (MoM)": f"{walcl_mom:.2f}% ({trend_balance})"
+            "FED Funds Rate": f"{fed_funds:.2f}%", "US CPI (Inflación YoY)": f"{cpi_yoy:.2f}%",
+            "US Unemployment Rate": f"{unrate:.1f}%", "FED Balance Sheet (MoM)": f"{walcl_mom:.2f}% ({"🟢 Inyectando" if walcl_mom > 0 else "🔴 Retirando"})"
         }
-    except Exception as e: 
-        return None
+    except: return None
 
-@st.cache_data(ttl=86400) 
+@st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
     if ticker.startswith("^") or "=" in ticker or ticker in ["MERVAL_USD", "GSR"] or ("-" in ticker and ticker != "BTC-USD"): return {}
     try:
@@ -237,40 +242,27 @@ def obtener_fundamentales(ticker):
         }
     except: return {}
 
-# Motor de Opciones Blindado con Try/Except por cada métrica
 @st.cache_data(ttl=3600)
 def obtener_opciones_titanes(tickers_titanes):
     resultados = []
     for t in tickers_titanes:
         try:
             tk = yf.Ticker(t)
-            exp = tk.options
-            if exp:
-                opt = tk.option_chain(exp[0])
-                puts = opt.puts
-                calls = opt.calls
-                
-                # Validación segura contra NaN o datos corruptos
-                p_oi = puts['openInterest'].sum() if 'openInterest' in puts else 0
-                c_oi = calls['openInterest'].sum() if 'openInterest' in calls else 0
-                
+            if tk.options:
+                opt = tk.option_chain(tk.options[0])
+                p_oi, c_oi = opt.puts['openInterest'].sum() if 'openInterest' in opt.puts else 0, opt.calls['openInterest'].sum() if 'openInterest' in opt.calls else 0
                 if pd.isna(p_oi): p_oi = 0
                 if pd.isna(c_oi): c_oi = 0
-                
-                ratio = round(p_oi/c_oi, 2) if c_oi > 0 else 0
-                
                 resultados.append({
-                    "Titan": t, 
-                    "Vencimiento": exp[0], 
-                    "Put/Call Ratio": ratio,
-                    "Puts (OI)": int(p_oi), 
-                    "Calls (OI)": int(c_oi)
+                    "Titan": t, "Put/Call Ratio": round(p_oi/c_oi, 2) if c_oi > 0 else 0,
+                    "Puts (OI)": int(p_oi), "Calls (OI)": int(c_oi)
                 })
-        except Exception: 
-            continue
+        except: continue
     return pd.DataFrame(resultados)
 
-# --- BLOQUE 4: CÁLCULO DE MÉTRICAS QUANTITATIVAS ---
+# ==========================================
+# BLOQUE 4: MOTOR MATEMÁTICO (RSI, MDD, SMA)
+# ==========================================
 def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u):
     fecha_p = pd.to_datetime(fecha_ref).normalize()
     serie_p = df_precios[ticker].loc[:fecha_p].dropna()
@@ -279,7 +271,6 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     es_a = fecha_p >= pd.to_datetime(fecha_u).normalize()
     
     def format_pct(val): return f"{val:.2f}%" if pd.notnull(val) and isinstance(val, (int, float)) else "-"
-    
     def pct_c(days):
         try: return ((precio_a - serie_p.iloc[-days]) / serie_p.iloc[-days]) * 100
         except: return "-"
@@ -296,47 +287,37 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
             delta = serie_p.diff()
             rs = delta.clip(lower=0).ewm(com=13, adjust=False).mean() / (-1 * delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
             rsi_val = f"{100 - (100 / (1 + rs)).iloc[-1]:.1f}"
-    except: pass
-
-    try:
-        if len(serie_p) >= 200: sma200_dist = format_pct(((precio_a - serie_p.rolling(window=200).mean().iloc[-1]) / serie_p.rolling(window=200).mean().iloc[-1]) * 100)
-    except: pass
-
-    try:
+        if len(serie_p) >= 200: sma200_dist = format_pct(((precio_a - serie_p.rolling(200).mean().iloc[-1]) / serie_p.rolling(200).mean().iloc[-1]) * 100)
         if len(serie_p.iloc[-252:]) > 0: mdd_val = format_pct(((serie_p.iloc[-252:] - serie_p.iloc[-252:].cummax()) / serie_p.iloc[-252:].cummax()).min() * 100)
     except: pass
 
     fund = obtener_fundamentales(ticker) if es_a else {}
-    nombre_link = f'<a href="{get_tv_url(ticker)}" target="_blank" class="tv-link">{nombre}</a>'
-
     return {
-        "Nombre": nombre_link, "Precio / Ratio": f"{precio_a:,.2f}", 
+        "Nombre": f'<a href="{get_tv_url(ticker)}" target="_blank" class="tv-link">{nombre}</a>', "Precio / Ratio": f"{precio_a:,.2f}", 
         "1D": format_pct(pct_c(1)), "1W": format_pct(pct_c(5)), "1M": format_pct(pct_c(21)), 
         "YTD": format_pct(ytd), "1Y": format_pct(pct_c(252)), "3Y": format_pct(pct_c(756)),
-        "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val,
-        "Low 52W": l52, "High 52W": h52,
+        "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val, "Low 52W": l52, "High 52W": h52,
         "P/E": f"{fund.get('PE'):.2f}" if isinstance(fund.get('PE'), (int,float)) else "-",
         "Beta": f"{fund.get('Beta'):.2f}" if isinstance(fund.get('Beta'), (int,float)) else "-",
         "Target": f"{fund.get('Target'):.2f}" if isinstance(fund.get('Target'), (int,float)) else "-",
-        "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-",
-        "Rec.": fund.get("Rec", "-")
+        "BPA": f"{fund.get('EPS'):.2f}" if isinstance(fund.get('EPS'), (int,float)) else "-", "Rec.": fund.get("Rec", "-")
     }
 
-# --- BLOQUE 5: INTERFAZ Y RENDERIZADO ---
-
-# Layout Invertido: Título a la izquierda, Controles a la derecha
+# ==========================================
+# BLOQUE 5: INTERFAZ VISUAL (UI)
+# ==========================================
 col_title, col_cal = st.columns([2, 1])
 
 df_p, df_v, hora_act = obtener_precios()
 
 with col_title: 
     st.title("🛡️ Master Command")
-    if hora_act:
-        st.caption(f"Última lectura del mercado: **{hora_act}** (Hora del Servidor)")
+    if hora_act: st.caption(f"Última lectura del mercado: **{hora_act}** (Hora del Servidor)")
         
 with col_cal: 
-    st.write("") # Espaciador
+    st.write("") 
     fecha_sel = st.date_input("🗓️ Fecha de Cálculo Histórico", value=date.today(), max_value=date.today())
+    # Botón que fuerza la eliminación del caché y vuelve a descargar todo al instante
     if st.button("🔄 Actualizar Datos Ahora"):
         st.cache_data.clear()
         st.rerun()
@@ -380,7 +361,9 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
             if res:
                 df_res = pd.DataFrame(res)
                 html_table = df_res.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y', 'SMA 200 Dist.', 'MDD 1Y']).hide(axis="index").to_html(escape=False)
-                st.markdown(f'<div class="table-container">{html_table}</div>', unsafe_allow_html=True)
+                # Aplicamos la clase CSS "titanes-scroll" SOLAMENTE si la categoría es Titanes
+                clase_css = "titanes-scroll" if "TITANES" in cat else "table-container"
+                st.markdown(f'<div class="{clase_css}">{html_table}</div>', unsafe_allow_html=True)
 
         if fecha_sel >= f_u:
             st.markdown("---")
@@ -405,7 +388,9 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
                     st.markdown(f'<div class="table-container">{df_opt.to_html(index=False)}</div>', unsafe_allow_html=True)
                 else: st.info("La API de Yahoo no reporta contratos abiertos en este momento.")
 
-# --- BLOQUE 6: EQUIVALENCIAS Y GLOSARIO ---
+# ==========================================
+# BLOQUE 6: EQUIVALENCIAS Y GLOSARIO (MARKDOWN NATIVO)
+# ==========================================
 st.markdown("---")
 st.subheader("🇪🇺 Equivalencias UCITS")
 ucits_df = pd.DataFrame({
@@ -414,39 +399,26 @@ ucits_df = pd.DataFrame({
 })
 st.markdown(f'<div class="table-container">{ucits_df.to_html(index=False)}</div>', unsafe_allow_html=True)
 
-# --- MANUAL DE INTERPRETACIÓN MEJORADO ---
-st.markdown("""
-<div style="background-color: #1E1E24; padding: 20px; border-radius: 8px; border-left: 5px solid #2962FF; margin-top: 20px;">
-    <h4>📚 Manual de Interpretación Analítica Avanzada</h4>
-    <p>Este tablero no solo monitoriza el mercado, sino que evalúa la salud estructural, el sentimiento oculto y los riesgos asimétricos de la cartera basándose en modelos cuantitativos.</p>
-    
-    <h5>1. Posicionamiento Macro y Liquidez (El Motor del Mercado)</h5>
-    <ul>
-        <li><b>Balance de la FED (Liquidez):</b> Es la variable más correlacionada con los mercados alcistas desde 2008. Si la variación es <span style="color:#90EE90">Verde (+)</span>, hay nueva liquidez entrando al sistema; el dinero buscará riesgo (Acciones, Bitcoin). Si es <span style="color:#FFB6C1">Rojo (-)</span>, el entorno es restrictivo y los rebotes del mercado suelen ser frágiles.</li>
-        <li><b>Gold/Silver Ratio (GSR):</b> Ratio de aversión al riesgo global. Un valor <b>superior a 80</b> indica estrés financiero severo o deflación (el capital huye hacia la seguridad del oro). Un valor <b>inferior a 60</b> señala crecimiento económico, inflación industrial y apetito por el riesgo (la plata se encarece).</li>
-    </ul>
+# El manual ahora usa puras etiquetas Markdown nativas de Streamlit para evitar
+# que el código HTML se rompa o se visualice mal en la web.
+st.info("""
+### 📚 Manual de Interpretación Analítica Avanzada
+Este tablero no solo monitoriza el mercado, sino que evalúa la salud estructural, el sentimiento oculto y los riesgos asimétricos de la cartera basándose en modelos cuantitativos.
 
-    <h5>2. Análisis Táctico e Indicadores Cuantitativos</h5>
-    <ul>
-        <li><b>RSI (Índice de Fuerza Relativa a 14 Días):</b> Mide la sobreextensión direccional del precio.
-            <ul>
-                <li><i>> 70 (Sobrecompra):</i> Euforia de corto plazo. Vulnerable a correcciones técnicas inminentes.</li>
-                <li><i>< 30 (Sobreventa):</i> Pánico de corto plazo. Suele presentar zonas de entrada de alta probabilidad estadística (rebote técnico).</li>
-            </ul>
-        </li>
-        <li><b>SMA 200 Dist. (Distancia a la Media Móvil 200):</b> La gravedad del mercado. Si un activo se desvía más de un +15% a +25% de su media móvil de 200 días, la "goma elástica" está al máximo de su capacidad. Comprar en estos niveles reduce drásticamente el ratio riesgo/beneficio.</li>
-        <li><b>MDD 1Y (Máximo Drawdown):</b> La caída más profunda desde el máximo relativo de los últimos 12 meses. Es el verdadero medidor del "Riesgo de Ruina". Permite dimensionar la volatilidad estructural de un activo para ajustar el tamaño de la posición.</li>
-    </ul>
+#### 1. Posicionamiento Macro y Liquidez (El Motor del Mercado)
+* **Balance de la FED (Liquidez):** Es la variable más correlacionada con los mercados alcistas desde 2008. Si la variación es **Verde (+)**, hay nueva liquidez entrando al sistema; el dinero buscará riesgo (Acciones, Bitcoin). Si es **Rojo (-)**, el entorno es restrictivo y los rebotes del mercado suelen ser frágiles.
+* **Gold/Silver Ratio (GSR):** Ratio de aversión al riesgo global. Un valor **superior a 80** indica estrés financiero severo o deflación (el capital huye hacia la seguridad del oro). Un valor **inferior a 60** señala crecimiento económico, inflación industrial y apetito por el riesgo (la plata se encarece).
 
-    <h5>3. Dinámica Institucional (Opciones y Correlación)</h5>
-    <ul>
-        <li><b>Matriz de Correlación (1 Año):</b> Revela el grado de diversificación real. Valores superiores a <b>+0.85 (Rojo)</b> significan que posees el mismo factor de riesgo bajo diferentes nombres. Valores <b>Negativos (Azul)</b> actúan como anclas estabilizadoras de la volatilidad del portafolio.</li>
-        <li><b>Sentimiento de Opciones (Put/Call Ratio):</b> Mide las apuestas direccionales del capital institucional.
-            <ul>
-                <li><i>Lectura Clásica:</i> Un ratio > 1.0 implica más Puts abiertas (miedo/cobertura bajista). Un ratio < 1.0 indica más Calls (apetito alcista).</li>
-                <li><i>Lectura Contrarian (Gamma Squeeze):</i> Cuando el ratio Put/Call es extremadamente bajo (ej. 0.40) junto con un RSI elevado, los creadores de mercado (Market Makers) están sobrecargados; la estructura está madura para un barrido de liquidez violento a la baja.</li>
-            </ul>
-        </li>
-    </ul>
-</div>
-""", unsafe_allow_html=True)
+#### 2. Análisis Táctico e Indicadores Cuantitativos
+* **RSI (Índice de Fuerza Relativa a 14 Días):** Mide la sobreextensión direccional del precio.
+    * *> 70 (Sobrecompra):* Euforia de corto plazo. Vulnerable a correcciones técnicas inminentes.
+    * *< 30 (Sobreventa):* Pánico de corto plazo. Suele presentar zonas de entrada de alta probabilidad estadística (rebote técnico).
+* **SMA 200 Dist. (Distancia a la Media Móvil 200):** La gravedad del mercado. Si un activo se desvía más de un +15% a +25% de su media móvil de 200 días, la "goma elástica" está al máximo de su capacidad. Comprar en estos niveles reduce drásticamente el ratio riesgo/beneficio.
+* **MDD 1Y (Máximo Drawdown):** La caída más profunda desde el máximo relativo de los últimos 12 meses. Es el verdadero medidor del "Riesgo de Ruina". Permite dimensionar la volatilidad estructural de un activo para ajustar el tamaño de la posición.
+
+#### 3. Dinámica Institucional (Opciones y Correlación)
+* **Matriz de Correlación (1 Año):** Revela el grado de diversificación real. Valores superiores a **+0.85 (Rojo)** significan que posees el mismo factor de riesgo bajo diferentes nombres. Valores **Negativos (Azul)** actúan como anclas estabilizadoras de la volatilidad del portafolio.
+* **Sentimiento de Opciones (Put/Call Ratio):** Mide las apuestas direccionales del capital institucional.
+    * *Lectura Clásica:* Un ratio > 1.0 implica más Puts abiertas (miedo/cobertura bajista). Un ratio < 1.0 indica más Calls (apetito alcista).
+    * *Lectura Contrarian (Gamma Squeeze):* Cuando el ratio Put/Call es extremadamente bajo (ej. 0.40) junto con un RSI elevado, los creadores de mercado (Market Makers) están sobrecargados; la estructura está madura para un barrido de liquidez violento a la baja.
+""")
