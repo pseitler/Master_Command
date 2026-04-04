@@ -3,21 +3,69 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, date
 
-# --- CONFIGURACIÓN DE PÁGINA Y DISEÑO VISUAL ---
+# --- CONFIGURACIÓN DE PÁGINA Y DISEÑO VISUAL AVANZADO ---
 st.set_page_config(layout="wide", page_title="Master Command by PS")
 
-# Estilos CSS para el modo oscuro y limpieza de las tablas (Look and feel profesional)
+# Inyección de CSS para diseño de terminal profesional, scroll horizontal y congelamiento de columnas
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
-    div[data-testid="stDataFrame"] { border: none; }
-    .st-emotion-cache-16idsys p { font-size: 14px; }
     h1 { text-align: right; }
+    
+    /* Contenedor que permite el scroll horizontal pero elimina el vertical */
+    .table-container {
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        margin-bottom: 2rem;
+        border-radius: 5px;
+    }
+    
+    /* Diseño base de la tabla HTML */
+    .table-container table {
+        width: 100%;
+        border-collapse: collapse;
+        color: #E0E0E0;
+        font-family: 'Inter', sans-serif;
+        font-size: 14px;
+    }
+    
+    /* Celdas generales */
+    .table-container th, .table-container td {
+        padding: 10px 14px;
+        text-align: center;
+        border-bottom: 1px solid #262730;
+        white-space: nowrap;
+    }
+    
+    /* Fila de Títulos (Headers) */
+    .table-container th {
+        background-color: #1E1E24;
+        color: #FFFFFF;
+        font-weight: 600;
+        border-bottom: 2px solid #333333;
+    }
+    
+    /* MAGIA VISUAL: Congelar la primera columna (Nombre) */
+    .table-container th:first-child, .table-container td:first-child {
+        position: sticky;
+        left: 0;
+        background-color: #0E1117; /* Mismo color del fondo principal para ocultar lo que pasa por debajo */
+        z-index: 2; /* Lo pone una capa por encima de las otras columnas */
+        text-align: left;
+        border-right: 1px solid #333333; /* Línea separadora sutil */
+        font-weight: bold;
+    }
+    
+    /* El título de la primera columna necesita estar una capa aún más arriba */
+    .table-container th:first-child {
+        background-color: #1E1E24;
+        z-index: 3;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- BLOQUE 1: DICCIONARIO MAESTRO DE ACTIVOS ---
-# Aquí organizamos todo el tablero. Hemos separado las Tasas (Yields) de los Precios (ETFs)
+# --- BLOQUE 1: DICCIONARIO MAESTRO ORDENADO ---
 ACTIVOS = {
     "MAJOR INDICES": {
         "S&P 500 (^GSPC)": "^GSPC",
@@ -51,7 +99,7 @@ ACTIVOS = {
         "30-Year T-Bond (^TYX)": "^TYX"
     },
     "BONDS (US ETFs - Precios)": {
-        "US Treasury 0-1Y ETF (SHV)": "SHV",  # Usado como proxy para el capital de corto plazo
+        "US Treasury 0-1Y ETF (SHV)": "SHV",
         "US Treasury 20Y+ ETF (TLT)": "TLT",
         "Intl Gov Bonds ETF (BNDX)": "BNDX"
     },
@@ -85,11 +133,10 @@ ACTIVOS = {
     }
 }
 
-# Tickers necesarios para calcular el CCL de Argentina
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: MOTOR DE EXTRACCIÓN DE DATOS ---
-@st.cache_data(ttl=300) # Memoria caché para no saturar Yahoo Finance (5 minutos)
+# --- BLOQUE 2: MOTOR DE DATOS ---
+@st.cache_data(ttl=300) 
 def obtener_precios():
     all_tickers = []
     for categoria in ACTIVOS.values():
@@ -99,10 +146,8 @@ def obtener_precios():
     all_tickers = list(set(all_tickers)) 
     
     try:
-        # Descarga de 10 años de historia bursátil
         data = yf.download(all_tickers, period="10y", interval="1d", auto_adjust=False)
         
-        # Lectura de la estructura de tablas de Yahoo Finance
         if isinstance(data.columns, pd.MultiIndex):
             df_precios = data['Adj Close'] if 'Adj Close' in data.columns.levels[0] else data['Close']
             df_volumen = data['Volume']
@@ -110,12 +155,10 @@ def obtener_precios():
             df_precios = data
             df_volumen = pd.DataFrame()
             
-        # Alineación de las fechas eliminando las horas (vital para la "Máquina del tiempo")
         df_precios.index = pd.to_datetime(df_precios.index).tz_localize(None).normalize()
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
-        # Cálculo interno del dólar Contado Con Liquidación para el Merval
         merv = df_precios['^MERV'].ffill()
         ggal_ba = df_precios['GGAL.BA'].ffill() 
         ggal_us = df_precios['GGAL'].ffill()    
@@ -127,9 +170,8 @@ def obtener_precios():
     except Exception as e:
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=3600) # Los datos fundamentales se guardan 1 hora
+@st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
-    # Evitamos pedir P/E o Beta de índices puros o divisas para evitar errores de la API
     if ticker.startswith("^") or "=" in ticker or ticker == "MERVAL_USD" or ("-" in ticker and ticker != "BTC-USD"):
         return {}
     try:
@@ -146,14 +188,13 @@ def obtener_fundamentales(ticker):
 
 @st.cache_data(ttl=3600)
 def obtener_opciones_titanes(tickers_titanes):
-    # Motor que extrae la posición abierta (Open Interest) de los contratos de opciones
     resultados = []
     for ticker in tickers_titanes:
         try:
             tk = yf.Ticker(ticker)
             expirations = tk.options
             if expirations:
-                opt = tk.option_chain(expirations[0]) # Toma el vencimiento más cercano
+                opt = tk.option_chain(expirations[0])
                 puts_oi = opt.puts['openInterest'].sum()
                 calls_oi = opt.calls['openInterest'].sum()
                 vol_puts = opt.puts['volume'].sum()
@@ -174,18 +215,16 @@ def obtener_opciones_titanes(tickers_titanes):
             continue
     return pd.DataFrame(resultados)
 
-# --- BLOQUE 3: LÓGICA MATEMÁTICA Y ARMADO DE FILAS ---
+# --- BLOQUE 3: CÁLCULO DE MÉTRICAS ---
 def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_ultima_cotizacion):
     if ticker not in df_precios.columns: raise ValueError("Sin datos")
 
-    # Corta el historial de precios según la fecha del calendario
     fecha_pandas = pd.to_datetime(fecha_ref).normalize()
     serie_precios = df_precios[ticker].loc[:fecha_pandas].dropna()
     
     if serie_precios.empty: raise ValueError("Sin datos")
     precio_actual = serie_precios.iloc[-1]
     
-    # Comprobación de fin de semana para habilitar datos fundamentales
     es_actual = fecha_pandas >= pd.to_datetime(fecha_ultima_cotizacion).normalize()
     
     def format_pct(val):
@@ -197,7 +236,6 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
             return ((precio_actual - inicio) / inicio) * 100
         except: return "-"
 
-    # Cálculos dinámicos de rentabilidad
     try:
         inicio_anio = serie_precios.loc[serie_precios.index.year == fecha_pandas.year].iloc[0]
         ytd = ((precio_actual - inicio_anio) / inicio_anio) * 100
@@ -210,7 +248,6 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     except:
         high_52w, low_52w = "-", "-"
 
-    # Cálculo del Volumen Relativo (% de volumen operado hoy vs promedio de 3 meses)
     vol_pct_str = "-"
     if es_actual and not df_volumen.empty and ticker in df_volumen.columns:
         serie_vol = df_volumen[ticker].loc[:fecha_pandas].dropna()
@@ -225,7 +262,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
 
     return {
         "Nombre": nombre,
-        "Precio / Tasa": f"{precio_actual:,.2f}", # Asegura siempre 2 decimales
+        "Precio / Tasa": f"{precio_actual:,.2f}",
         "Low 52W": low_52w,
         "High 52W": high_52w,
         "1D": format_pct(pct_change(1)),
@@ -242,7 +279,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
         "Rec.": fund.get("Rec", "-")
     }
 
-# --- BLOQUE 4: INTERFAZ VISUAL MASTER COMMAND ---
+# --- BLOQUE 4: INTERFAZ MASTER COMMAND ---
 col_cal, col_title = st.columns([1, 2])
 with col_cal:
     fecha_seleccionada = st.date_input(
@@ -253,7 +290,6 @@ with col_cal:
 with col_title:
     st.title("🛡️ Master Command by PS")
 
-# Función que aplica el Mapa de Calor (Heatmap) solo a las columnas de porcentaje
 def color_heatmap(val):
     if isinstance(val, str) and "%" in val:
         try:
@@ -265,7 +301,7 @@ def color_heatmap(val):
             elif num < -1: color = '#B22222' 
             elif num < 0: color = '#CD5C5C' 
             else: color = 'transparent'
-            return f'background-color: {color}; color: white'
+            return f'background-color: {color}; color: white; border-radius: 4px;'
         except: return ''
     return ''
 
@@ -275,7 +311,6 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
     if df_precios.empty:
         st.error("🚨 Error de conexión con el proveedor de datos. Los servidores de Yahoo pueden estar saturados.")
     else:
-        # Detecta el último día hábil para solucionar problemas de fines de semana y festivos
         fecha_ultima_cotizacion = df_precios.index[-1].date()
         
         for categoria, items in ACTIVOS.items():
@@ -288,16 +323,14 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
                     lista_resultados.append(metrica)
                 except: continue
             
-            # Dibuja la tabla aplicando el color map
             if lista_resultados:
                 df_display = pd.DataFrame(lista_resultados)
-                st.dataframe(
-                    df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
-                    hide_index=True,
-                    use_container_width=True
-                )
+                
+                # Renderizado HTML puro para lograr el efecto Sticky Column y evitar Scroll Vertical
+                styled_html = df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']).hide(axis="index").to_html()
+                st.markdown(f'<div class="table-container">{styled_html}</div>', unsafe_allow_html=True)
 
-        # MÓDULO DE POSICIÓN ABIERTA (Opciones)
+        # MÓDULO DE POSICIÓN ABIERTA
         es_actual_global = pd.to_datetime(fecha_seleccionada).date() >= fecha_ultima_cotizacion
         if es_actual_global:
             st.markdown("---")
@@ -307,11 +340,13 @@ with st.spinner('Consolidando datos de mercado, opciones y fundamentales...'):
             tickers_titanes = list(ACTIVOS["TITANES GLOBALES (15)"].values())
             df_opciones = obtener_opciones_titanes(tickers_titanes)
             if not df_opciones.empty:
-                st.dataframe(df_opciones, hide_index=True, use_container_width=True)
+                # Renderizado HTML puro
+                html_opciones = df_opciones.style.hide(axis="index").to_html()
+                st.markdown(f'<div class="table-container">{html_opciones}</div>', unsafe_allow_html=True)
             else:
                 st.info("Datos de cadena de opciones no disponibles temporalmente en la API (Común en fines de semana por mantenimiento).")
 
-# --- BLOQUE 5: TABLA REFERENCIAL UCITS ---
+# --- BLOQUE 5: TABLA DE EQUIVALENCIAS UCITS ---
 st.markdown("---")
 st.subheader("🇪🇺 Diccionario de Equivalencias: US ETFs a UCITS (Europa)")
 ucits_data = {
@@ -336,4 +371,6 @@ ucits_data = {
         "NDIA.L", "HMCH.L", "IBZL.AS", "CMX1.DE"
     ]
 }
-st.table(pd.DataFrame(ucits_data))
+# Renderizado HTML puro
+html_ucits = pd.DataFrame(ucits_data).style.hide(axis="index").to_html()
+st.markdown(f'<div class="table-container">{html_ucits}</div>', unsafe_allow_html=True)
