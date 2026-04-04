@@ -1,13 +1,12 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Market Tracker Pro")
 
 # --- BLOQUE 1: DICCIONARIO MAESTRO DE ACTIVOS ---
-# Contiene la estructura completa. Se priorizan ETFs UCITS (.L, .DE, .AS, .PA) y acciones directas.
 ACTIVOS = {
     "MAJOR INDICES (UCITS)": {
         "S&P 500": "VUSA.L",
@@ -81,7 +80,7 @@ ACTIVOS = {
         "Brazil": "EWZ",
         "Mexico": "EWW",
         "MSCI EM LatAm": "LTAM.L",
-        "Argentina (Merval USD CCL)": "MERVAL_USD" # Ticker sintético creado por nosotros
+        "Argentina (Merval USD CCL)": "MERVAL_USD" 
     },
     "US SECTORS (UCITS)": {
         "Technology": "IUIT.L",
@@ -109,69 +108,68 @@ ACTIVOS = {
     }
 }
 
-# Tickers auxiliares necesarios para calcular el Merval en USD CCL
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
 # --- BLOQUE 2: MOTOR DE DATOS Y LÓGICA MERVAL ---
-@st.cache_data(ttl=300) # Guarda los datos 5 minutos para no saturar Yahoo Finance
+@st.cache_data(ttl=300) 
 def obtener_datos():
-    # Recopilamos todos los tickers, incluyendo los auxiliares
     all_tickers = []
     for categoria in ACTIVOS.values():
         all_tickers.extend(list(categoria.values()))
     
-    # Eliminamos el ticker sintético antes de descargar, ya que Yahoo no lo conoce
     if "MERVAL_USD" in all_tickers:
         all_tickers.remove("MERVAL_USD")
         
     all_tickers.extend(TICKERS_AUXILIARES)
-    all_tickers = list(set(all_tickers)) # Eliminamos duplicados
+    all_tickers = list(set(all_tickers)) 
     
-    # Descargamos 4 años de historia para los cálculos de largo plazo
-    df = yf.download(all_tickers, period="4y", interval="1d")['Adj Close']
+    # IMPORTANTE: Aumentamos a 10 años para poder viajar al pasado y seguir teniendo 3 años previos
+    df = yf.download(all_tickers, period="10y", interval="1d")['Adj Close']
     
-    # Lógica de cálculo: Merval Contado Con Liquidación (CCL)
     try:
-        # Llenamos vacíos (días festivos) repitiendo el último precio válido (ffill)
         merv = df['^MERV'].ffill()
-        ggal_ba = df['GGAL.BA'].ffill() # Galicia en Pesos
-        ggal_us = df['GGAL'].ffill()    # Galicia ADR en USD
+        ggal_ba = df['GGAL.BA'].ffill() 
+        ggal_us = df['GGAL'].ffill()    
         
-        # El ratio de conversión del ADR de Galicia es 10 a 1
         ccl = ggal_ba / (ggal_us * 10)
         merval_usd = merv / ccl
         
-        # Añadimos nuestra serie sintética al dataframe principal
         df['MERVAL_USD'] = merval_usd
     except Exception as e:
-        df['MERVAL_USD'] = pd.Series(dtype=float) # Columna vacía si falla la conexión
+        df['MERVAL_USD'] = pd.Series(dtype=float) 
         
     return df
 
-# --- BLOQUE 3: CÁLCULO DE MÉTRICAS FINANCIERAS ---
-def calcular_metricas(df, ticker, nombre):
-    # Extraemos la serie de precios del activo, eliminando días sin cotización
-    serie = df[ticker].dropna()
+# --- BLOQUE 3: CÁLCULO DE MÉTRICAS FINANCIERAS EN EL TIEMPO ---
+# Se añade el parámetro fecha_ref para saber hasta dónde mirar
+def calcular_metricas(df, ticker, nombre, fecha_ref):
+    # Convertimos la fecha del calendario a un formato que entienda la base de datos
+    fecha_pandas = pd.to_datetime(fecha_ref)
+    
+    # CORTAMOS LA HISTORIA: Eliminamos todos los datos que ocurrieron después de la fecha elegida
+    serie = df[ticker].loc[:fecha_pandas].dropna()
+    
     if serie.empty:
-        raise ValueError("Sin datos")
+        raise ValueError("Sin datos para esta fecha")
         
+    # El "precio actual" ahora es el precio del último día válido hasta la fecha elegida
     precio_actual = serie.iloc[-1]
+    fecha_precio_real = serie.index[-1].strftime('%d-%m-%Y') # Guardamos qué día exacto tomó (por si fue fin de semana)
     
     def pct_change(days):
         try:
-            # Buscamos el precio de hace 'X' días hábiles
             inicio = serie.iloc[-days]
             return ((precio_actual - inicio) / inicio) * 100
         except: return 0.0
 
-    # Cálculo Year-to-Date (YTD): Rendimiento desde el 1 de enero
+    # Cálculo YTD ajustado: Busca el inicio del año de la fecha elegida
     try:
-        inicio_anio = serie.loc[serie.index.year == datetime.now().year].iloc[0]
+        inicio_anio = serie.loc[serie.index.year == fecha_pandas.year].iloc[0]
         ytd = ((precio_actual - inicio_anio) / inicio_anio) * 100
     except:
         ytd = 0.0
     
-    # Cálculo de los rangos de 52 Semanas (1 año bursátil = 252 días)
+    # Cálculo de 52 Semanas ajustado a la fecha elegida
     try:
         ultimo_anio = serie.iloc[-252:]
         high_52w = ((precio_actual - ultimo_anio.max()) / ultimo_anio.max()) * 100
@@ -179,11 +177,11 @@ def calcular_metricas(df, ticker, nombre):
     except:
         high_52w, low_52w = 0.0, 0.0
 
-    # Construimos la fila de resultados para la tabla
     return {
         "Nombre": nombre,
         "Ticker": ticker,
         "Precio": round(precio_actual, 2),
+        "Fecha Ref.": fecha_precio_real, # Nueva columna útil
         "Low 52W": f"{round(low_52w, 1)}%",
         "High 52W": f"{round(high_52w, 1)}%",
         "1D": round(serie.pct_change().iloc[-1] * 100, 2),
@@ -194,45 +192,51 @@ def calcular_metricas(df, ticker, nombre):
         "3Y": round(pct_change(756), 2)
     }
 
-# --- BLOQUE 4: MOTOR VISUAL Y RENDERIZADO (FRONTEND) ---
+# --- BLOQUE 4: MOTOR VISUAL Y RENDERING ---
 st.title("📊 Global Market & Macro Tracker")
-st.caption(f"Última actualización: {datetime.now().strftime('%d-%m-%Y %H:%M:%S')} (Hora Servidor)")
 
-# Función de formato condicional (Heatmap)
+# MÁQUINA DEL TIEMPO: Interfaz de Calendario
+col1, col2 = st.columns([1, 3])
+with col1:
+    fecha_seleccionada = st.date_input(
+        "🗓️ Seleccionar Fecha de Análisis", 
+        value=date.today(), # Por defecto arranca hoy
+        max_value=date.today() # No permite elegir fechas del futuro
+    )
+
+st.caption(f"Calculando rentabilidades respecto a los precios de cierre del: {fecha_seleccionada.strftime('%d-%m-%Y')}")
+
 def color_heatmap(val):
     try:
         val = float(val)
-        # Escala de colores inspirada en terminales de Wall Street
-        if val > 3: color = '#1E7B1E' # Verde muy oscuro
-        elif val > 1: color = '#228B22' # Verde fuerte
-        elif val > 0: color = '#90EE90' # Verde claro
-        elif val < -3: color = '#8B0000' # Rojo muy oscuro
-        elif val < -1: color = '#FF4500' # Rojo fuerte
-        elif val < 0: color = '#FFB6C1' # Rojo claro
+        if val > 3: color = '#1E7B1E' 
+        elif val > 1: color = '#228B22' 
+        elif val > 0: color = '#90EE90' 
+        elif val < -3: color = '#8B0000' 
+        elif val < -1: color = '#FF4500' 
+        elif val < 0: color = '#FFB6C1' 
         else: color = 'transparent'
         return f'background-color: {color}; color: {"white" if abs(val) > 1 else "black"}'
     except:
         return ''
 
-with st.spinner('Procesando datos del mercado global y calculando CCL...'):
+with st.spinner(f'Procesando mercado y calculando métricas históricas al {fecha_seleccionada.strftime("%d-%m-%Y")}...'):
     precios = obtener_datos()
     
-    # Recorremos cada categoría de nuestro diccionario y creamos una tabla
     for categoria, items in ACTIVOS.items():
         st.subheader(categoria)
         lista_resultados = []
         
         for nombre, ticker in items.items():
             try:
-                metrica = calcular_metricas(precios, ticker, nombre)
+                # Enviamos la fecha del calendario a la función matemática
+                metrica = calcular_metricas(precios, ticker, nombre, fecha_seleccionada)
                 lista_resultados.append(metrica)
             except Exception as e:
-                # Si un ticker falla (ej. día festivo local), lo saltamos para no romper el tablero
                 continue
         
         if lista_resultados:
             df_display = pd.DataFrame(lista_resultados)
-            # Ocultamos el índice numérico por defecto de Pandas para mayor limpieza visual
             st.dataframe(
                 df_display.style.map(color_heatmap, subset=['1D', '1W', '1M', 'YTD', '1Y', '3Y']),
                 hide_index=True,
