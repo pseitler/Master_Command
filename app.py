@@ -109,6 +109,7 @@ ACTIVOS = {
     },
     "COMMODITIES": {
         "Oil Brent (BZ=F)": "BZ=F", "Gold (GC=F)": "GC=F", "Silver (SI=F)": "SI=F",
+        "Gold / Silver Ratio (GSR)": "GSR", # Nuevo activo sintético
         "Copper (HG=F)": "HG=F", "Soybeans (ZS=F)": "ZS=F", "Bitcoin (BTC-USD)": "BTC-USD"
     },
     "GLOBAL FACTORS (US ETFs)": {
@@ -132,19 +133,38 @@ ACTIVOS = {
 
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
-# --- BLOQUE 2: LÓGICA DE TRADINGVIEW ---
+# --- BLOQUE 2: LÓGICA DE TRADINGVIEW CORREGIDA ---
 def get_tv_url(ticker):
-    symbol = ticker
-    if ticker == "^GSPC": symbol = "SPX"
-    elif ticker == "^NDX": symbol = "NDX"
-    elif ticker == "^DJI": symbol = "DJI"
-    elif ticker == "^FTSE": symbol = "FTSE"
-    elif ticker == "^IBEX": symbol = "IBEX"
-    elif ticker == "^GDAXI": symbol = "DAX"
-    elif "MERVAL" in ticker: symbol = "MERV"
+    # Diccionario de equivalencias exactas entre Yahoo Finance y TradingView
+    tv_mapping = {
+        "^GSPC": "SPX",
+        "^NDX": "NDX",
+        "^DJI": "DJI",
+        "^FTSE": "UKX",
+        "^IBEX": "IBC",
+        "^GDAXI": "DAX",
+        "^STOXX50E": "STOXX50",
+        "^VIX": "VIX",
+        "^IRX": "US03MY",  # Tasa 3 meses en TV
+        "^FVX": "US05Y",   # Tasa 5 años en TV
+        "^TNX": "US10Y",   # Tasa 10 años en TV
+        "^TYX": "US30Y",   # Tasa 30 años en TV
+        "GSR": "XAUXAG"    # Gold/Silver Ratio en TV
+    }
+    
+    if ticker in tv_mapping:
+        symbol = tv_mapping[ticker]
+    elif "MERVAL" in ticker:
+        symbol = "MERV"
     else:
-        symbol = re.sub(r'[\^=X]', '', ticker) 
-        symbol = symbol.replace('-', '') 
+        # Limpiamos el sufijo de las divisas sin borrar letras estructurales
+        symbol = ticker.replace('=X', '')
+        symbol = symbol.replace('=F', '')
+        # Limpiamos guiones (ej. BTC-USD -> BTCUSD)
+        symbol = symbol.replace('-', '')
+        # Limpiamos el acento circunflejo si quedó alguno
+        symbol = symbol.replace('^', '')
+        
     return f"https://www.tradingview.com/chart/?symbol={symbol}"
 
 # --- BLOQUE 3: MOTOR DE DATOS (YAHOO Y NATIVO FRED) ---
@@ -152,7 +172,11 @@ def get_tv_url(ticker):
 def obtener_precios():
     all_tickers = []
     for cat in ACTIVOS.values(): all_tickers.extend(list(cat.values()))
+    
+    # Excluimos los activos sintéticos para que Yahoo no devuelva error
     if "MERVAL_USD" in all_tickers: all_tickers.remove("MERVAL_USD")
+    if "GSR" in all_tickers: all_tickers.remove("GSR")
+        
     all_tickers.extend(TICKERS_AUXILIARES)
     all_tickers = list(set(all_tickers)) 
     
@@ -168,14 +192,19 @@ def obtener_precios():
         if not df_volumen.empty:
             df_volumen.index = pd.to_datetime(df_volumen.index).tz_localize(None).normalize()
         
+        # Cálculo del CCL Merval
         merv, ggal_ba, ggal_us = df_precios['^MERV'].ffill(), df_precios['GGAL.BA'].ffill(), df_precios['GGAL'].ffill()    
         df_precios['MERVAL_USD'] = merv / (ggal_ba / (ggal_us * 10))
+        
+        # Cálculo sintético del Gold/Silver Ratio (GSR)
+        if 'GC=F' in df_precios.columns and 'SI=F' in df_precios.columns:
+            df_precios['GSR'] = df_precios['GC=F'] / df_precios['SI=F']
+            
         return df_precios, df_volumen
     except: return pd.DataFrame(), pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def obtener_macro_fred():
-    # Nueva extracción nativa sin depender de pandas_datareader
     try:
         def fetch_fred(series_id):
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
@@ -192,13 +221,11 @@ def obtener_macro_fred():
         fed_funds = fed_df['FEDFUNDS'].iloc[-1]
         unrate = unrate_df['UNRATE'].iloc[-1]
 
-        # Inflación CPI YoY
         cpi_latest = cpi_df['CPIAUCSL'].iloc[-1]
         one_year_ago = cpi_df.index[-1] - pd.DateOffset(years=1)
         idx = cpi_df.index.get_indexer([one_year_ago], method='nearest')[0]
         cpi_yoy = ((cpi_latest / cpi_df['CPIAUCSL'].iloc[idx]) - 1) * 100
 
-        # Balance MoM
         walcl_latest = walcl_df['WALCL'].iloc[-1]
         one_month_ago = walcl_df.index[-1] - pd.DateOffset(months=1)
         idx_m = walcl_df.index.get_indexer([one_month_ago], method='nearest')[0]
@@ -217,7 +244,8 @@ def obtener_macro_fred():
 
 @st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
-    if ticker.startswith("^") or "=" in ticker or ticker == "MERVAL_USD" or ("-" in ticker and ticker != "BTC-USD"): return {}
+    # Excluimos explícitamente el GSR para no buscar fundamentales de un ratio
+    if ticker.startswith("^") or "=" in ticker or ticker in ["MERVAL_USD", "GSR"] or ("-" in ticker and ticker != "BTC-USD"): return {}
     try:
         info = yf.Ticker(ticker).info
         return {
@@ -290,7 +318,7 @@ def calcular_metricas(df_precios, df_volumen, ticker, nombre, fecha_ref, fecha_u
     nombre_link = f'<a href="{get_tv_url(ticker)}" target="_blank" class="tv-link">{nombre}</a>'
 
     return {
-        "Nombre": nombre_link, "Precio / Tasa": f"{precio_a:,.2f}", 
+        "Nombre": nombre_link, "Precio / Ratio": f"{precio_a:,.2f}", 
         "1D": format_pct(pct_c(1)), "1W": format_pct(pct_c(5)), "1M": format_pct(pct_c(21)), 
         "YTD": format_pct(ytd), "1Y": format_pct(pct_c(252)), "3Y": format_pct(pct_c(756)),
         "RSI (14)": rsi_val, "SMA 200 Dist.": sma200_dist, "MDD 1Y": mdd_val,
@@ -409,6 +437,7 @@ st.markdown("""
                 <li><i>Azul Intenso (Negativo):</i> Se mueven de forma inversa. Sirven de cobertura (hedge).</li>
             </ul>
         </li>
+        <li><b>Gold/Silver Ratio (GSR):</b> Cuántas onzas de plata se necesitan para comprar una de oro. Picos altos (>80) suelen indicar recesión o pánico estructural, mientras que valles (<50) sugieren expansión económica e inflación.</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
