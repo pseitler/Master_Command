@@ -151,7 +151,7 @@ def get_tv_url(ticker):
         "^GSPC": "SPX", "^NDX": "NDX", "^DJI": "DJI", "^FTSE": "UKX",
         "^IBEX": "IBC", "^GDAXI": "DAX", "^STOXX50E": "STOXX50",
         "^VIX": "VIX", "^IRX": "US03MY", "^FVX": "US05Y", "^TNX": "US10Y",
-        "^TYX": "US30Y", "GSR": "XAUXAG"
+        "^TYX": "US30Y", "GSR": "XAUXAG", "BRK-B": "BRK.B"
     }
     if ticker in tv_mapping: symbol = tv_mapping[ticker]
     elif "MERVAL" in ticker: symbol = "MERV"
