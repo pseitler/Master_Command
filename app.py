@@ -395,7 +395,7 @@ def generar_tabla_portfolio_html(df, clase_css):
     <thead>
         <tr>
             <th class="group-header">IDENTIFICACIÓN</th>
-            <th colspan="6" class="group-header">POSICIÓN & RENDIMIENTO</th>
+            <th colspan="8" class="group-header">POSICIÓN & MERCADO</th>
             <th colspan="6" class="group-header">RENDIMIENTOS HISTÓRICOS (%)</th>
             <th colspan="3" class="group-header">ANÁLISIS QUANT</th>
             <th colspan="6" class="group-header">FUNDAMENTALES</th>
@@ -403,6 +403,7 @@ def generar_tabla_portfolio_html(df, clase_css):
         <tr>
             <th>Nombre</th>
             <th>Cantidad</th><th>Precio Prom.</th><th>Precio Mercado</th><th>Valor Mercado</th><th>Peso %</th><th>Retorno %</th>
+            <th>Low 52W</th><th>High 52W</th>
             <th>1D</th><th>1W</th><th>1M</th><th>YTD</th><th>1Y</th><th>3Y</th>
             <th>RSI (14)</th><th>SMA 200</th><th>MDD 1Y</th>
             <th>P/E</th><th>Fwd P/E</th><th>Beta</th><th>Target</th><th>BPA</th><th>Rec.</th>
@@ -412,7 +413,7 @@ def generar_tabla_portfolio_html(df, clase_css):
     '''
     for _, row in df.iterrows():
         html += "<tr>"
-        col_order = ["Nombre", "Cantidad", "Precio Promedio", "Precio Mercado", "Valor Mercado", "Peso %", "Retorno %", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]
+        col_order = ["Nombre", "Cantidad", "Precio Promedio", "Precio Mercado", "Valor Mercado", "Peso %", "Retorno %", "Low 52W", "High 52W", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]
         for col in col_order:
             val = row.get(col, "-")
             if col in ["1D", "1W", "1M", "YTD", "1Y", "3Y", "SMA 200 Dist.", "MDD 1Y", "Retorno %"]:
@@ -500,7 +501,7 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
                             "Peso %": f"{weight_pct:.2f}%",
                             "Retorno %": format_pct(gain_pct)
                         }
-                        for key in ["1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]:
+                        for key in ["Low 52W", "High 52W", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]:
                             row_dict[key] = res_base.get(key, "-")
                         res.append(row_dict)
                     except Exception as e:
