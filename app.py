@@ -143,6 +143,43 @@ ACTIVOS = {
 
 TICKERS_AUXILIARES = ["^MERV", "GGAL.BA", "GGAL"]
 
+def get_portfolio():
+    import os
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(base_dir, "Positions.csv")
+        if not os.path.exists(csv_path): return {}, {}, {}
+        df = pd.read_csv(csv_path, skiprows=2)
+        df = df.dropna(subset=['Symbol'])
+        valid_assets = ['Equity', 'ETFs & Closed End Funds']
+        df = df[df['Asset Type'].isin(valid_assets)]
+        
+        portfolio = {}
+        quantities = {}
+        cost_basis = {}
+        for _, row in df.iterrows():
+            sym = row['Symbol']
+            if isinstance(sym, str):
+                if "BRK/B" in sym: sym = "BRK-B"
+                portfolio[row['Description']] = sym
+                try: quantities[sym] = float(str(row['Qty (Quantity)']).replace(',', ''))
+                except: quantities[sym] = 0
+                try: cost_basis[sym] = float(str(row['Cost Basis']).replace('$', '').replace(',', ''))
+                except: cost_basis[sym] = 0
+        return portfolio, quantities, cost_basis
+    except Exception as e:
+        return {}, {}, {}
+
+PORTFOLIO_ASSETS, PORTFOLIO_QTY, PORTFOLIO_COST = get_portfolio()
+
+NEW_ACTIVOS = {}
+for k, v in ACTIVOS.items():
+    NEW_ACTIVOS[k] = v
+    if k == "TITANES GLOBALES (15)":
+        if PORTFOLIO_ASSETS:
+            NEW_ACTIVOS["MI PORTFOLIO"] = PORTFOLIO_ASSETS
+ACTIVOS = NEW_ACTIVOS
+
 # ==========================================
 # BLOQUE 2: LINKS A TRADINGVIEW
 # ==========================================
@@ -339,6 +376,41 @@ def generar_tabla_html_agrupada(df, clase_css):
     html += "</tbody></table></div>"
     return html
 
+def generar_tabla_portfolio_html(df, clase_css):
+    html = f'<div class="{clase_css}"><table>'
+    html += '''
+    <thead>
+        <tr>
+            <th class="group-header">IDENTIFICACIÓN</th>
+            <th colspan="6" class="group-header">POSICIÓN & RENDIMIENTO</th>
+            <th colspan="6" class="group-header">RENDIMIENTOS HISTÓRICOS (%)</th>
+            <th colspan="3" class="group-header">ANÁLISIS QUANT</th>
+            <th colspan="6" class="group-header">FUNDAMENTALES</th>
+        </tr>
+        <tr>
+            <th>Nombre</th>
+            <th>Cantidad</th><th>Precio Prom.</th><th>Precio Mercado</th><th>Valor Mercado</th><th>Peso %</th><th>Retorno %</th>
+            <th>1D</th><th>1W</th><th>1M</th><th>YTD</th><th>1Y</th><th>3Y</th>
+            <th>RSI (14)</th><th>SMA 200</th><th>MDD 1Y</th>
+            <th>P/E</th><th>Fwd P/E</th><th>Beta</th><th>Target</th><th>BPA</th><th>Rec.</th>
+        </tr>
+    </thead>
+    <tbody>
+    '''
+    for _, row in df.iterrows():
+        html += "<tr>"
+        col_order = ["Nombre", "Cantidad", "Precio Promedio", "Precio Mercado", "Valor Mercado", "Peso %", "Retorno %", "1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]
+        for col in col_order:
+            val = row.get(col, "-")
+            if col in ["1D", "1W", "1M", "YTD", "1Y", "3Y", "SMA 200 Dist.", "MDD 1Y", "Retorno %"]:
+                style = color_heatmap(str(val))
+                html += f'<td style="{style}">{val}</td>'
+            else:
+                html += f"<td>{val}</td>"
+        html += "</tr>"
+    html += "</tbody></table></div>"
+    return html
+
 def color_heatmap(val):
     if isinstance(val, str) and "%" in val:
         try:
@@ -379,15 +451,64 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
         for cat, items in ACTIVOS.items():
             st.subheader(cat)
             res = []
-            for n, t in items.items():
-                try: res.append(calcular_metricas(df_p, df_v, t, n, fecha_sel, f_u))
-                except: continue
             
-            if res:
-                df_res = pd.DataFrame(res)
-                clase_css = "titanes-scroll" if "TITANES" in cat else "table-container"
-                html_table = generar_tabla_html_agrupada(df_res, clase_css)
-                st.markdown(html_table, unsafe_allow_html=True)
+            if cat == "MI PORTFOLIO":
+                total_mv = 0
+                for n, t in items.items():
+                    fecha_p = pd.to_datetime(fecha_sel).normalize()
+                    try:
+                        serie_p = df_p[t].loc[:fecha_p].dropna()
+                        if not serie_p.empty:
+                            total_mv += serie_p.iloc[-1] * PORTFOLIO_QTY.get(t, 0)
+                    except: pass
+
+                for n, t in items.items():
+                    try:
+                        res_base = calcular_metricas(df_p, df_v, t, n, fecha_sel, f_u)
+                        qty = PORTFOLIO_QTY.get(t, 0)
+                        cb = PORTFOLIO_COST.get(t, 0)
+                        
+                        market_price = float(res_base['Precio / Ratio'].replace(',', ''))
+                        mkt_val = qty * market_price
+                        cost_price = cb / qty if qty > 0 else 0
+                        weight_pct = (mkt_val / total_mv) * 100 if total_mv > 0 else 0
+                        gain_pct = ((market_price - cost_price) / cost_price) * 100 if cost_price > 0 else 0
+                        
+                        def format_pct(val): return f"{val:.2f}%" if pd.notnull(val) and isinstance(val, (int, float)) else "-"
+                        
+                        qty_str = f"{qty:,.4f}".rstrip('0').rstrip('.') if '.' in f"{qty:,.4f}" else f"{qty:,.4f}"
+                        
+                        row_dict = {
+                            "Nombre": res_base["Nombre"],
+                            "Cantidad": qty_str,
+                            "Precio Promedio": f"${cost_price:,.2f}",
+                            "Precio Mercado": f"${market_price:,.2f}",
+                            "Valor Mercado": f"${mkt_val:,.2f}",
+                            "Peso %": f"{weight_pct:.2f}%",
+                            "Retorno %": format_pct(gain_pct)
+                        }
+                        for key in ["1D", "1W", "1M", "YTD", "1Y", "3Y", "RSI (14)", "SMA 200 Dist.", "MDD 1Y", "P/E", "Fwd P/E", "Beta", "Target", "BPA", "Rec."]:
+                            row_dict[key] = res_base.get(key, "-")
+                        res.append(row_dict)
+                    except Exception as e:
+                        pass
+                
+                if res:
+                    df_res = pd.DataFrame(res)
+                    html_table = generar_tabla_portfolio_html(df_res, "titanes-scroll")
+                    st.markdown(html_table, unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ No se encontraron cotizaciones del Portfolio en memoria. Por favor, haz clic en el botón superior **🔄 Actualizar Datos Ahora** para forzar la descarga de los nuevos tickers.")
+            else:
+                for n, t in items.items():
+                    try: res.append(calcular_metricas(df_p, df_v, t, n, fecha_sel, f_u))
+                    except: continue
+                
+                if res:
+                    df_res = pd.DataFrame(res)
+                    clase_css = "titanes-scroll" if "TITANES" in cat else "table-container"
+                    html_table = generar_tabla_html_agrupada(df_res, clase_css)
+                    st.markdown(html_table, unsafe_allow_html=True)
             
             # Ubicar Buscador debajo de TITANES GLOBALES
             if cat == "TITANES GLOBALES (15)":
