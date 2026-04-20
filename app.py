@@ -149,23 +149,36 @@ def get_portfolio():
         base_dir = os.path.dirname(os.path.abspath(__file__))
         csv_path = os.path.join(base_dir, "Positions.csv")
         if not os.path.exists(csv_path): return {}, {}, {}
-        df = pd.read_csv(csv_path, skiprows=2)
+        
+        # Leemos el CSV (ahora con los campos fijos, sin skiprows)
+        df = pd.read_csv(csv_path)
         df = df.dropna(subset=['Symbol'])
-        valid_assets = ['Equity', 'ETFs & Closed End Funds']
-        df = df[df['Asset Type'].isin(valid_assets)]
         
         portfolio = {}
         quantities = {}
         cost_basis = {}
         for _, row in df.iterrows():
-            sym = row['Symbol']
-            if isinstance(sym, str):
-                if "BRK/B" in sym: sym = "BRK-B"
-                portfolio[row['Description']] = sym
-                try: quantities[sym] = float(str(row['Qty (Quantity)']).replace(',', ''))
-                except: quantities[sym] = 0
-                try: cost_basis[sym] = float(str(row['Cost Basis']).replace('$', '').replace(',', ''))
-                except: cost_basis[sym] = 0
+            sym = str(row['Symbol']).strip()
+            if not sym or sym == 'nan': continue
+            if "BRK/B" in sym: sym = "BRK-B"
+            
+            # Nombre Corto (TICKER)
+            desc = str(row['Description']).strip()
+            # Tomar primeras dos palabras para un nombre amigable
+            words = desc.split()
+            short_name = " ".join([w.capitalize() for w in words[:2]])
+            nombre_final = f"{short_name} ({sym})"
+            
+            portfolio[nombre_final] = sym
+            
+            # Cantidad
+            try: quantities[sym] = float(str(row['Qty (Quantity)']).replace(',', '').replace('"', ''))
+            except: quantities[sym] = 0
+            
+            # Cost Basis
+            try: cost_basis[sym] = float(str(row['Cost Basis']).replace('$', '').replace(',', '').replace('"', '').strip())
+            except: cost_basis[sym] = 0
+            
         return portfolio, quantities, cost_basis
     except Exception as e:
         return {}, {}, {}
