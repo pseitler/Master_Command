@@ -275,6 +275,40 @@ def obtener_macro_fred():
         }
     except: return None
 
+@st.cache_data(ttl=86400)
+def obtener_tasas_bancos_centrales():
+    try:
+        def fetch_fred(series_id):
+            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+            df = pd.read_csv(url, index_col='DATE', parse_dates=True)
+            df.columns = [series_id]
+            df[series_id] = pd.to_numeric(df[series_id], errors='coerce')
+            return df.dropna()
+
+        tasas = []
+        try:
+            fed_df = fetch_fred('FEDFUNDS')
+            tasas.append({"Nombre": "🇺🇸 FED (EE.UU.)", "Tasa Actual": f"{fed_df.iloc[-1].values[0]:.2f}%"})
+        except: pass
+        
+        try:
+            ecb_df = fetch_fred('ECBDFR')
+            tasas.append({"Nombre": "🇪🇺 BCE (Eurozona)", "Tasa Actual": f"{ecb_df.iloc[-1].values[0]:.2f}%"})
+        except: pass
+
+        try:
+            boe_df = fetch_fred('IUDSOIA')
+            tasas.append({"Nombre": "🇬🇧 Banco de Inglaterra", "Tasa Actual": f"{boe_df.iloc[-1].values[0]:.2f}%"})
+        except: pass
+
+        try:
+            boj_df = fetch_fred('IRSTCB01JPM156N')
+            tasas.append({"Nombre": "🇯🇵 Banco de Japón", "Tasa Actual": f"{boj_df.iloc[-1].values[0]:.2f}%"})
+        except: pass
+
+        return tasas if tasas else None
+    except: return None
+
 @st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
     if ticker.startswith("^") or "=" in ticker or ticker in ["MERVAL_USD", "GSR"] or ("-" in ticker and ticker != "BTC-USD"): return {}
@@ -517,6 +551,19 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
                 for n, t in items.items():
                     try: res.append(calcular_metricas(df_p, df_v, t, n, fecha_sel, f_u))
                     except: continue
+                
+                if cat == "US TREASURY YIELD CURVE (Tasas %)":
+                    df_cb = obtener_tasas_bancos_centrales()
+                    if df_cb is not None:
+                        for item in df_cb:
+                            res.append({
+                                "Nombre": f'<span style="color:#A0A0A0; font-weight:bold;">{item["Nombre"]}</span>',
+                                "Precio / Ratio": f'<span style="color:#4CAF50; font-weight:bold;">{item["Tasa Actual"]}</span>',
+                                "Low 52W": "-", "High 52W": "-",
+                                "1D": "-", "1W": "-", "1M": "-", "YTD": "-", "1Y": "-", "3Y": "-",
+                                "RSI (14)": "-", "SMA 200 Dist.": "-", "MDD 1Y": "-",
+                                "P/E": "-", "Fwd P/E": "-", "Beta": "-", "Target": "-", "BPA": "-", "Rec.": "-"
+                            })
                 
                 if res:
                     df_res = pd.DataFrame(res)
