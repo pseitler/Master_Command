@@ -114,8 +114,9 @@ ACTIVOS = {
     "US TREASURY YIELD CURVE & WORLD INTEREST RATES": {
         "13-Week T-Bill (^IRX)": "^IRX", "5-Year T-Note (^FVX)": "^FVX", "10-Year T-Note (^TNX)": "^TNX", "30-Year T-Bond (^TYX)": "^TYX"
     },
-    "BONDS (US ETFs - Precios)": {
-        "US Treasury 0-1Y ETF (SHV)": "SHV", "US Treasury 20Y+ ETF (TLT)": "TLT", "Intl Gov Bonds ETF (BNDX)": "BNDX"
+    "BONDS (US/WORLD ETFs - Precios)": {
+        "US Treasury 0-1Y ETF (SHV)": "SHV", "US Treasury 20Y+ ETF (TLT)": "TLT", "Intl Gov Bonds ETF (BNDX)": "BNDX",
+        "Intl Treasury Bonds (IGOV)": "IGOV", "Emerging Mkts Bonds (EMB)": "EMB"
     },
     "COMMODITIES": {
         "Oil Brent (BZ=F)": "BZ=F", "Gold (GC=F)": "GC=F", "Silver (SI=F)": "SI=F",
@@ -651,9 +652,11 @@ ucits_data = [
     {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "MSCI World (URTH)", "UCITS Recomendado": "IWDA.L / EUNL.DE"},
     {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "MSCI Emerging Markets (EEM)", "UCITS Recomendado": "EMIM.L / IS3N.DE"},
     {"Categoría": "MAJOR INDICES", "ETF (Ticker US)": "S&P 500 Equal Weight (RSP)", "UCITS Recomendado": "SPXW.L / XDEW.DE"},
-    {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "US Treasury 0-1Y (SHV)", "UCITS Recomendado": "VDST.L / IB01.L"},
-    {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "US Treasury 20Y+ (TLT)", "UCITS Recomendado": "DTLA.L / IDTL.L"},
-    {"Categoría": "BONDS (US ETFs)", "ETF (Ticker US)": "Intl Gov Bonds (BNDX)", "UCITS Recomendado": "VETY.DE / IGLA.L"},
+    {"Categoría": "BONDS (US/WORLD ETFs)", "ETF (Ticker US)": "US Treasury 0-1Y (SHV)", "UCITS Recomendado": "VDST.L / IB01.L"},
+    {"Categoría": "BONDS (US/WORLD ETFs)", "ETF (Ticker US)": "US Treasury 20Y+ (TLT)", "UCITS Recomendado": "DTLA.L / IDTL.L"},
+    {"Categoría": "BONDS (US/WORLD ETFs)", "ETF (Ticker US)": "Intl Gov Bonds (BNDX)", "UCITS Recomendado": "VETY.DE / IGLA.L"},
+    {"Categoría": "BONDS (US/WORLD ETFs)", "ETF (Ticker US)": "Intl Treasury Bonds (IGOV)", "UCITS Recomendado": "IGLA.L / IGLO.L"},
+    {"Categoría": "BONDS (US/WORLD ETFs)", "ETF (Ticker US)": "Emerging Mkts Bonds (EMB)", "UCITS Recomendado": "IEMB.L / EMBE.L"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Large Cap Value (IVE)", "UCITS Recomendado": "CBUV.L / IUSV.DE"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Large Cap Growth (IVW)", "UCITS Recomendado": "IUSG.DE / IWYG.L"},
     {"Categoría": "GLOBAL FACTORS", "ETF (Ticker US)": "Small Cap Value (IWN)", "UCITS Recomendado": "ZPRV.DE"},
