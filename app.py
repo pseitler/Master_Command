@@ -111,7 +111,7 @@ ACTIVOS = {
         "EUR / USD (EURUSD=X)": "EURUSD=X", "EUR / GBP (EURGBP=X)": "EURGBP=X", "EUR / JPY (EURJPY=X)": "EURJPY=X",
         "USD / EUR (USDEUR=X)": "USDEUR=X", "USD / GBP (USDGBP=X)": "USDGBP=X", "USD / JPY (USDJPY=X)": "USDJPY=X"
     },
-    "US TREASURY YIELD CURVE (Tasas %)": {
+    "US TREASURY YIELD CURVE & WORLD INTEREST RATES": {
         "13-Week T-Bill (^IRX)": "^IRX", "5-Year T-Note (^FVX)": "^FVX", "10-Year T-Note (^TNX)": "^TNX", "30-Year T-Bond (^TYX)": "^TYX"
     },
     "BONDS (US ETFs - Precios)": {
@@ -249,8 +249,11 @@ def obtener_precios():
 def obtener_macro_fred():
     try:
         def fetch_fred(series_id):
+            import urllib.request
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            df = pd.read_csv(url, index_col='DATE', parse_dates=True)
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
+                df = pd.read_csv(response, index_col='DATE', parse_dates=True)
             df.columns = [series_id]
             df[series_id] = pd.to_numeric(df[series_id], errors='coerce')
             return df.dropna()
@@ -279,8 +282,11 @@ def obtener_macro_fred():
 def obtener_tasas_bancos_centrales():
     try:
         def fetch_fred(series_id):
+            import urllib.request
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            df = pd.read_csv(url, index_col='DATE', parse_dates=True)
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
+                df = pd.read_csv(response, index_col='DATE', parse_dates=True)
             df.columns = [series_id]
             df[series_id] = pd.to_numeric(df[series_id], errors='coerce')
             return df.dropna()
@@ -552,7 +558,7 @@ with st.spinner('Validando caché y procesando matemáticas en memoria...'):
                     try: res.append(calcular_metricas(df_p, df_v, t, n, fecha_sel, f_u))
                     except: continue
                 
-                if cat == "US TREASURY YIELD CURVE (Tasas %)":
+                if cat == "US TREASURY YIELD CURVE & WORLD INTEREST RATES":
                     df_cb = obtener_tasas_bancos_centrales()
                     if df_cb is not None:
                         for item in df_cb:
