@@ -278,18 +278,38 @@ def obtener_macro_fred():
         }
     except: return None
 
-@st.cache_data
+@st.cache_data(ttl=86400)
 def obtener_tasas_bancos_centrales():
-    # Las tasas de los bancos centrales cambian infrecuentemente (cada 1-2 meses máximo).
-    # Se utilizan valores estáticos para evitar cuelgues (hangs) por bloqueos de la API de FRED
-    # o de otros portales institucionales que rechazan peticiones automatizadas desde la nube.
-    # Puedes actualizar estos valores manualmente cuando ocurran reuniones de política monetaria.
-    return [
-        {"Nombre": "🇺🇸 FED (EE.UU.)", "Tasa Actual": "5.50%"},
-        {"Nombre": "🇪🇺 BCE (Eurozona)", "Tasa Actual": "4.50%"},
-        {"Nombre": "🇬🇧 Banco de Inglaterra", "Tasa Actual": "5.25%"},
-        {"Nombre": "🇯🇵 Banco de Japón", "Tasa Actual": "0.10%"}
-    ]
+    try:
+        import urllib.request
+        import re
+        url = "https://www.global-rates.com/en/interest-rates/central-banks/central-banks.aspx"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode('utf-8')
+            
+            rates = {}
+            banks = {
+                "american-fed-federal-funds-rate": "🇺🇸 FED (EE.UU.)",
+                "european-ecb-refinancing-rate": "🇪🇺 BCE (Eurozona)",
+                "british-boe-official-bank-rate": "🇬🇧 Banco de Inglaterra",
+                "japanese-boj-overnight-call-rate": "🇯🇵 Banco de Japón"
+            }
+            
+            for key, name in banks.items():
+                pattern = f'href="[^"]*{key}[^"]*".*?([0-9\\.\\-]+)\\s*%'
+                match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
+                if match:
+                    rates[name] = match.group(1) + "%"
+                else:
+                    rates[name] = "-"
+            
+            return [
+                {"Nombre": name, "Tasa Actual": rates[name]}
+                for name in banks.values()
+            ]
+    except Exception as e:
+        return None
 
 @st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
