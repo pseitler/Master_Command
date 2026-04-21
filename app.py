@@ -278,42 +278,18 @@ def obtener_macro_fred():
         }
     except: return None
 
-@st.cache_data(ttl=86400)
+@st.cache_data
 def obtener_tasas_bancos_centrales():
-    try:
-        def fetch_fred(series_id):
-            import urllib.request
-            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
-                df = pd.read_csv(response, index_col='DATE', parse_dates=True)
-            df.columns = [series_id]
-            df[series_id] = pd.to_numeric(df[series_id], errors='coerce')
-            return df.dropna()
-
-        tasas = []
-        try:
-            fed_df = fetch_fred('FEDFUNDS')
-            tasas.append({"Nombre": "🇺🇸 FED (EE.UU.)", "Tasa Actual": f"{fed_df.iloc[-1].values[0]:.2f}%"})
-        except: pass
-        
-        try:
-            ecb_df = fetch_fred('ECBDFR')
-            tasas.append({"Nombre": "🇪🇺 BCE (Eurozona)", "Tasa Actual": f"{ecb_df.iloc[-1].values[0]:.2f}%"})
-        except: pass
-
-        try:
-            boe_df = fetch_fred('IUDSOIA')
-            tasas.append({"Nombre": "🇬🇧 Banco de Inglaterra", "Tasa Actual": f"{boe_df.iloc[-1].values[0]:.2f}%"})
-        except: pass
-
-        try:
-            boj_df = fetch_fred('IRSTCB01JPM156N')
-            tasas.append({"Nombre": "🇯🇵 Banco de Japón", "Tasa Actual": f"{boj_df.iloc[-1].values[0]:.2f}%"})
-        except: pass
-
-        return tasas if tasas else None
-    except: return None
+    # Las tasas de los bancos centrales cambian infrecuentemente (cada 1-2 meses máximo).
+    # Se utilizan valores estáticos para evitar cuelgues (hangs) por bloqueos de la API de FRED
+    # o de otros portales institucionales que rechazan peticiones automatizadas desde la nube.
+    # Puedes actualizar estos valores manualmente cuando ocurran reuniones de política monetaria.
+    return [
+        {"Nombre": "🇺🇸 FED (EE.UU.)", "Tasa Actual": "5.50%"},
+        {"Nombre": "🇪🇺 BCE (Eurozona)", "Tasa Actual": "4.50%"},
+        {"Nombre": "🇬🇧 Banco de Inglaterra", "Tasa Actual": "5.25%"},
+        {"Nombre": "🇯🇵 Banco de Japón", "Tasa Actual": "0.10%"}
+    ]
 
 @st.cache_data(ttl=3600) 
 def obtener_fundamentales(ticker):
